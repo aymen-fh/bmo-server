@@ -210,6 +210,12 @@ router.get('/stats/:childId', protect, async (req, res) => {
 // @access  Private
 router.get('/sessions/:childId', protect, async (req, res) => {
   try {
+    const clamp01 = (n) => {
+      const x = Number(n);
+      if (!Number.isFinite(x)) return 0;
+      return Math.max(0, Math.min(100, x));
+    };
+
     const child = await Child.findById(req.params.childId);
 
     if (!child) {
@@ -249,12 +255,15 @@ router.get('/sessions/:childId', protect, async (req, res) => {
       .map(session => ({
         sessionDate: session.sessionDate,
         duration: session.duration || 0,
+        planExerciseId: session.planExerciseId || null,
+        planSessionIndex: typeof session.planSessionIndex === 'number' ? session.planSessionIndex : null,
+        planSessionName: session.planSessionName || null,
         totalAttempts: session.totalAttempts || 0,
         successfulAttempts: session.successfulAttempts || 0,
         failedAttempts: session.failedAttempts || 0,
-        averageScore: session.averageScore || 0,
+        averageScore: clamp01(session.averageScore || 0),
         successRate: session.totalAttempts > 0
-          ? (session.successfulAttempts / session.totalAttempts) * 100
+          ? clamp01((session.successfulAttempts / session.totalAttempts) * 100)
           : 0
       }));
 

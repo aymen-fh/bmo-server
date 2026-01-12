@@ -33,7 +33,8 @@ router.get('/search-specialists', protect, authorize('parent'), async (req, res)
         }
 
         const specialists = await User.find(searchQuery)
-            .select('_id name email phone specialization profilePhoto bio')
+            .select('_id name email phone specialization profilePhoto bio center')
+            .populate('center', '_id name nameEn address phone email description')
             .limit(30);
 
         res.json({

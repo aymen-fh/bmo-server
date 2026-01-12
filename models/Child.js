@@ -39,7 +39,22 @@ const childSchema = new mongoose.Schema({
   sessionStructure: {
     playDuration: { type: Number, default: 15 },
     breakDuration: { type: Number, default: 10 },
-    encouragementMessages: { type: Boolean, default: true }
+    encouragementMessages: { type: Boolean, default: true },
+    // Max attempts allowed per session (Child-Game expects this key)
+    maxAttempts: { type: Number, default: 30 }
+  },
+  // Optional schedule to control WHEN the child can play.
+  // Stored as local-time windows in HH:mm.
+  playSchedule: {
+    enabled: { type: Boolean, default: false },
+    // 0=Sunday .. 6=Saturday
+    allowedDays: [{ type: Number, min: 0, max: 6 }],
+    windows: [{
+      start: { type: String, trim: true }, // 'HH:mm'
+      end: { type: String, trim: true }    // 'HH:mm'
+    }],
+    // If true, the game should block play outside schedule.
+    enforce: { type: Boolean, default: true }
   },
   targetLetters: [{
     type: String,

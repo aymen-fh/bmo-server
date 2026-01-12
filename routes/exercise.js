@@ -9,7 +9,7 @@ const { protect, authorize } = require('../middleware/auth');
 // @access  Private (Specialist)
 router.post('/', protect, authorize('specialist'), async (req, res) => {
   try {
-    const { childId, letters, words, targetDuration, endDate } = req.body;
+    const { childId, letters, words, targetDuration, endDate, sessionName } = req.body;
 
     const child = await Child.findById(childId);
 
@@ -27,21 +27,43 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
       });
     }
 
+    // Ensure only one active plan at a time (kind: 'plan')
+    await Exercise.updateMany(
+      { child: childId, kind: 'plan', active: true },
+      { $set: { active: false } }
+    );
+
+    // Auto-increment session index (Session 1, Session 2, ...)
+    const last = await Exercise.findOne({ child: childId, kind: 'plan' })
+      .sort({ sessionIndex: -1, createdAt: -1 })
+      .select('sessionIndex');
+
+    const nextSessionIndex = (typeof last?.sessionIndex === 'number' ? last.sessionIndex : 0) + 1;
+
     const exercise = await Exercise.create({
       child: childId,
       specialist: req.user.id,
+      kind: 'plan',
+      sessionIndex: nextSessionIndex,
+      sessionName: sessionName || `Session ${nextSessionIndex}`,
       letters,
       words,
       targetDuration,
       endDate
     });
 
-    // Update child's target letters and words
-    if (letters) {
-      child.targetLetters = letters.map(l => l.letter);
+    // Update child's targets (store just the text for quick reference)
+    if (Array.isArray(letters)) {
+      child.targetLetters = letters
+        .map(l => (l && typeof l === 'object') ? l.letter : l)
+        .map(x => String(x || '').trim())
+        .filter(Boolean);
     }
-    if (words) {
-      child.targetWords = words.map(w => w.word);
+    if (Array.isArray(words)) {
+      child.targetWords = words
+        .map(w => (w && typeof w === 'object') ? w.word : w)
+        .map(x => String(x || '').trim())
+        .filter(Boolean);
     }
     await child.save();
 
@@ -86,7 +108,13 @@ router.get('/child/:childId', protect, async (req, res) => {
       });
     }
 
-    const exercises = await Exercise.find({ child: req.params.childId, active: true })
+    const includeInactive = String(req.query.includeInactive || '').toLowerCase() === '1'
+      || String(req.query.includeInactive || '').toLowerCase() === 'true';
+
+    const filter = { child: req.params.childId };
+    if (!includeInactive) filter.active = true;
+
+    const exercises = await Exercise.find(filter)
       .populate('specialist', 'name specialization')
       .sort('-createdAt');
 

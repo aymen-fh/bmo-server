@@ -39,6 +39,10 @@ const exerciseSchema = new mongoose.Schema({
     category: String, // emotions, needs, actions
     difficulty: { type: String, enum: ['easy', 'medium', 'hard'] }
   }],
+  // Numbered plan sessions: Session 1, Session 2, ...
+  // Only meaningful for kind: 'plan'.
+  sessionIndex: { type: Number, default: null },
+  sessionName: { type: String, trim: true, default: null },
   targetDuration: Number, // minutes per day
   startDate: { type: Date, default: Date.now },
   endDate: Date,

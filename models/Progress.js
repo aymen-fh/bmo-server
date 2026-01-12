@@ -22,6 +22,10 @@ const attemptSchema = new mongoose.Schema({
 const sessionSchema = new mongoose.Schema({
   sessionDate: { type: Date, default: Date.now },
   duration: Number, // minutes
+  // Link a played session to the active plan session (Exercise)
+  planExerciseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Exercise', default: null },
+  planSessionIndex: { type: Number, default: null },
+  planSessionName: { type: String, default: null },
   totalAttempts: { type: Number, default: 0 },
   successfulAttempts: { type: Number, default: 0 },
   failedAttempts: { type: Number, default: 0 },
@@ -58,16 +62,22 @@ const progressSchema = new mongoose.Schema({
 
 // Method to calculate overall stats
 progressSchema.methods.updateOverallStats = function() {
+  const clamp01 = (n) => {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return 0;
+    return Math.max(0, Math.min(100, x));
+  };
+
   const stats = this.overallStats;
   stats.totalSessions = this.sessions.length;
   stats.totalPlayTime = this.sessions.reduce((sum, s) => sum + (s.duration || 0), 0);
   stats.totalAttempts = this.sessions.reduce((sum, s) => sum + (s.totalAttempts || 0), 0);
   
   const successfulAttempts = this.sessions.reduce((sum, s) => sum + (s.successfulAttempts || 0), 0);
-  stats.successRate = stats.totalAttempts > 0 ? (successfulAttempts / stats.totalAttempts) * 100 : 0;
+  stats.successRate = stats.totalAttempts > 0 ? clamp01((successfulAttempts / stats.totalAttempts) * 100) : 0;
   
   const totalScore = this.sessions.reduce((sum, s) => sum + (s.averageScore || 0), 0);
-  stats.averageScore = this.sessions.length > 0 ? totalScore / this.sessions.length : 0;
+  stats.averageScore = this.sessions.length > 0 ? clamp01(totalScore / this.sessions.length) : 0;
   
   return this;
 };

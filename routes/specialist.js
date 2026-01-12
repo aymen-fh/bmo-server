@@ -112,7 +112,7 @@ router.post('/reject-child/:childId', protect, authorize('specialist'), async (r
 // @access  Private (Specialist)
 router.post('/set-duration/:childId', protect, authorize('specialist'), async (req, res) => {
   try {
-    const { dailyPlayDuration, sessionStructure } = req.body;
+    const { dailyPlayDuration, sessionStructure, playSchedule } = req.body;
 
     const child = await Child.findById(req.params.childId);
 
@@ -130,8 +130,23 @@ router.post('/set-duration/:childId', protect, authorize('specialist'), async (r
       });
     }
 
-    if (dailyPlayDuration) child.dailyPlayDuration = dailyPlayDuration;
-    if (sessionStructure) child.sessionStructure = sessionStructure;
+    if (typeof dailyPlayDuration === 'number') {
+      child.dailyPlayDuration = dailyPlayDuration;
+    }
+
+    if (sessionStructure && typeof sessionStructure === 'object') {
+      child.sessionStructure = {
+        ...(child.sessionStructure || {}),
+        ...sessionStructure,
+      };
+    }
+
+    if (playSchedule && typeof playSchedule === 'object') {
+      child.playSchedule = {
+        ...(child.playSchedule || {}),
+        ...playSchedule,
+      };
+    }
 
     await child.save();
 
