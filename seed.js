@@ -182,6 +182,20 @@ const seedDatabase = async () => {
     // ========================================
     // LINK PARENTS TO SPECIALISTS (Updated)
     // ========================================
+    async function ensureReferral({ parentId, specialistId, referralType, status, notes }) {
+      await Referral.updateOne(
+        { parent: parentId, specialist: specialistId, referralType },
+        {
+          $setOnInsert: {
+            status: status || 'active',
+            notes: notes || '',
+            referralDate: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+    }
+
     if (specialistsCreated.length > 0 && parentsCreated.length > 0) {
       // Assign first 2 parents to first specialist
       const sp1 = specialistsCreated[0];
@@ -199,22 +213,20 @@ const seedDatabase = async () => {
         console.log(`🔗 Linked Parents ${p1.email}, ${p2.email} to Specialist ${sp1.email}`);
 
         // Create referral records for these linkages
-        await Referral.create([
-          {
-            parent: p1._id,
-            specialist: sp1._id,
-            referralType: 'admin_assigned',
-            status: 'active',
-            notes: 'Initial seed data linkage'
-          },
-          {
-            parent: p2._id,
-            specialist: sp1._id,
-            referralType: 'admin_assigned',
-            status: 'active',
-            notes: 'Initial seed data linkage'
-          }
-        ]);
+        await ensureReferral({
+          parentId: p1._id,
+          specialistId: sp1._id,
+          referralType: 'admin_assigned',
+          status: 'active',
+          notes: 'Initial seed data linkage'
+        });
+        await ensureReferral({
+          parentId: p2._id,
+          specialistId: sp1._id,
+          referralType: 'admin_assigned',
+          status: 'active',
+          notes: 'Initial seed data linkage'
+        });
         console.log(`📝 Created referral records for ${p1.email} and ${p2.email}`);
       }
 
@@ -235,22 +247,20 @@ const seedDatabase = async () => {
           console.log(`🔗 Linked Parents ${p3.email}, ${p4.email} to Specialist ${sp2.email}`);
 
           // Create referral records for these linkages
-          await Referral.create([
-            {
-              parent: p3._id,
-              specialist: sp2._id,
-              referralType: 'admin_assigned',
-              status: 'active',
-              notes: 'Initial seed data linkage'
-            },
-            {
-              parent: p4._id,
-              specialist: sp2._id,
-              referralType: 'admin_assigned',
-              status: 'active',
-              notes: 'Initial seed data linkage'
-            }
-          ]);
+          await ensureReferral({
+            parentId: p3._id,
+            specialistId: sp2._id,
+            referralType: 'admin_assigned',
+            status: 'active',
+            notes: 'Initial seed data linkage'
+          });
+          await ensureReferral({
+            parentId: p4._id,
+            specialistId: sp2._id,
+            referralType: 'admin_assigned',
+            status: 'active',
+            notes: 'Initial seed data linkage'
+          });
           console.log(`📝 Created referral records for ${p3.email} and ${p4.email}`);
         }
       }

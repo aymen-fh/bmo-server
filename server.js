@@ -29,6 +29,7 @@ const adminRoutes = require('./routes/admin');
 const debugRoutes = require('./routes/debug');
 const { verifyTransporter } = require('./services/emailService');
 const seedDatabase = require('./seed');
+const User = require('./models/User');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -55,7 +56,33 @@ if (!fs.existsSync(avatarsDir)) {
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" } // Allow images to be loaded by other domains/apps
 }));
-app.use(cors());
+
+// CORS
+// - Mobile apps often don't send an Origin header (native HTTP clients)
+// - Web apps do, and may require Authorization headers (preflight)
+// Configure via CORS_ORIGINS="https://site1.com,https://site2.com".
+const corsOriginsRaw = String(process.env.CORS_ORIGINS || '').trim();
+const allowedOrigins = corsOriginsRaw
+  ? corsOriginsRaw.split(',').map(s => s.trim()).filter(Boolean)
+  : [];
+
+const allowAllOrigins = allowedOrigins.length === 0;
+const corsCredentials = String(process.env.CORS_CREDENTIALS || '').toLowerCase() === 'true';
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowAllOrigins) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
+  credentials: corsCredentials,
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(morgan('combined'));
 
@@ -151,7 +178,11 @@ const PORT = Number(process.env.PORT || 5000);
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  cors: {
+    origin: allowAllOrigins ? '*' : allowedOrigins,
+    credentials: corsCredentials,
+    methods: ['GET', 'POST'],
+  }
 });
 
 app.set('io', io);
@@ -243,14 +274,39 @@ async function connectMongoWithRetry() {
 
     console.log('✅ قاعدة البيانات جاهزة تماماً');
 
-    const shouldSeed = String(process.env.FORCE_SEED || '').toLowerCase() === 'true';
-    if (shouldSeed) {
-      console.log('--- بدء ملء قاعدة البيانات (FORCE_SEED=true) ---');
+    const forceSeed = String(process.env.FORCE_SEED || '').toLowerCase() === 'true';
+    const localDev = !isRailway && process.env.NODE_ENV !== 'production';
+    const seedIfMissing =
+      String(process.env.SEED_IF_MISSING || '').toLowerCase() === 'true' || localDev;
+
+    // Seeding behavior:
+    // - FORCE_SEED=true: clear & re-create seed data (seed.js handles clearing)
+    // - SEED_IF_MISSING=true (or local dev): only seed if DB is empty or core seed accounts are missing
+    if (forceSeed || seedIfMissing) {
       try {
-        await seedDatabase();
-        console.log('--- اكتمال ملء قاعدة البيانات ---');
+        let shouldRunSeed = forceSeed;
+
+        if (!shouldRunSeed) {
+          const usersCount = await User.estimatedDocumentCount();
+          const superadminExists = await User.exists({ email: 'superadmin@bmo.com' });
+          const centerAdminExists = await User.exists({ email: 'admin@bmo.com' });
+
+          shouldRunSeed = usersCount === 0 || !superadminExists || !centerAdminExists;
+        }
+
+        if (shouldRunSeed) {
+          console.log(
+            forceSeed
+              ? '--- بدء ملء قاعدة البيانات (FORCE_SEED=true) ---'
+              : '--- بدء ملء قاعدة البيانات (SEED_IF_MISSING/local dev) ---'
+          );
+          await seedDatabase();
+          console.log('--- اكتمال ملء قاعدة البيانات ---');
+        } else {
+          console.log('📊 Seed data موجودة. تم تخطي عملية seeding.');
+        }
       } catch (seedError) {
-        console.error('❌ خطأ في ملء قاعدة البيانات:', seedError);
+        console.error('❌ خطأ في ملء/فحص قاعدة البيانات:', seedError);
         console.log('⚠️ سيتم متابعة تشغيل الخادم على أي حال...');
       }
     }
