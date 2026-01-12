@@ -153,7 +153,8 @@ router.get('/words', protect, async (req, res) => {
                 child: {
                     _id: child._id,
                     name: child.name,
-                    age: child.age
+                    age: child.age,
+                    avatarId: child.avatarId
                 },
                 words,
                 letters,
@@ -164,7 +165,7 @@ router.get('/words', protect, async (req, res) => {
             // Get all children assigned to this specialist
             const children = await Child.find({ assignedSpecialist: req.user.id })
                 .populate('parent', 'name')
-                .select('_id name age parent');
+                .select('_id name age parent avatarId');
 
             res.json({
                 success: true,
