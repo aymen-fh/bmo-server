@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const os = require('os');
 // Load .env only for local development. On Railway (and most hosts), environment
 // variables are injected by the platform and a committed .env can cause outages
 // (e.g. forcing NODE_ENV=development, seeding, wrong PORT).
@@ -30,6 +31,7 @@ const debugRoutes = require('./routes/debug');
 const { verifyTransporter } = require('./services/emailService');
 const seedDatabase = require('./seed');
 const User = require('./models/User');
+const Center = require('./models/Center');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -86,6 +88,36 @@ app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(morgan('combined'));
 
+function getLocalIPv4Addresses() {
+  const nets = os.networkInterfaces();
+  const results = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net && net.family === 'IPv4' && !net.internal) {
+        results.push({ name, address: net.address });
+      }
+    }
+  }
+  return results;
+}
+
+function normalizeIp(ip) {
+  if (!ip) return 'unknown';
+  // handle x-forwarded-for lists
+  const first = String(ip).split(',')[0].trim();
+  // handle ipv6-mapped ipv4
+  return first.startsWith('::ffff:') ? first.replace('::ffff:', '') : first;
+}
+
+function classifyUserAgent(uaRaw) {
+  const ua = String(uaRaw || '').toLowerCase();
+  if (!ua) return 'unknown';
+  if (ua.includes('dart') || ua.includes('okhttp') || ua.includes('cfnetwork') || ua.includes('dio')) return 'mobile-app';
+  if (ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari') || ua.includes('firefox') || ua.includes('edge')) return 'web-browser';
+  if (ua.includes('postman') || ua.includes('insomnia') || ua.includes('curl')) return 'api-client';
+  return 'unknown';
+}
+
 // Manual route for serving uploads to debug 404s
 // Manual route for serving uploads to debug 404s (Disabled in favor of express.static)
 // app.get('/uploads/:filename', (req, res) => {
@@ -105,9 +137,13 @@ app.use('/static', express.static(publicDir));
 
 // Log connected devices
 app.use((req, res, next) => {
-  const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  const userAgent = req.headers['user-agent'];
-  console.log(`📱 [Device Request] IP: ${ip}, Device: ${userAgent}, Endpoint: ${req.method} ${req.url}`);
+  const ip = normalizeIp(req.headers['x-forwarded-for'] || req.connection.remoteAddress);
+  const userAgent = req.headers['user-agent'] || 'n/a';
+  const origin = req.headers.origin || 'n/a';
+  const deviceType = classifyUserAgent(userAgent);
+  console.log(
+    `📱 [Device Request] Type: ${deviceType}, IP: ${ip}, Origin: ${origin}, UA: ${userAgent}, Endpoint: ${req.method} ${req.url}`
+  );
   next();
 });
 
@@ -188,10 +224,15 @@ const io = new Server(server, {
 app.set('io', io);
 
 io.on('connection', (socket) => {
-  const clientIp = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
+  const clientIp = normalizeIp(socket.handshake.headers['x-forwarded-for'] || socket.handshake.address);
   const userId = socket.handshake.auth?.userId;
+  const origin = socket.handshake.headers?.origin || 'n/a';
+  const userAgent = socket.handshake.headers?.['user-agent'] || 'n/a';
+  const deviceType = classifyUserAgent(userAgent);
 
-  console.log(`🔌 [New Socket Connection] IP: ${clientIp}, Socket ID: ${socket.id}, UserID: ${userId || 'n/a'}`);
+  console.log(
+    `🔌 [New Socket Connection] Type: ${deviceType}, IP: ${clientIp}, Origin: ${origin}, Socket ID: ${socket.id}, UserID: ${userId || 'n/a'}`
+  );
 
   if (userId) {
     socket.join(userId.toString());
@@ -214,6 +255,23 @@ io.on('connection', (socket) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 Accepting connections from all network interfaces`);
+
+  const ips = getLocalIPv4Addresses();
+  if (ips.length) {
+    console.log('🌐 Device access URLs (same Wi‑Fi/LAN):');
+    for (const { name, address } of ips) {
+      console.log(`   - ${name}: http://${address}:${PORT}`);
+    }
+  } else {
+    console.log('🌐 Device access URLs: لم يتم العثور على IPv4 محلي (تحقق من الشبكة).');
+  }
+
+  if (allowAllOrigins) {
+    console.log('🛡️ CORS: allow-all (CORS_ORIGINS not set)');
+  } else {
+    console.log(`🛡️ CORS: restricted to ${allowedOrigins.length} origin(s)`);
+    for (const o of allowedOrigins) console.log(`   - ${o}`);
+  }
 });
 
 // Graceful shutdown (Railway/hosts send SIGTERM on deploy/restart)
@@ -256,6 +314,9 @@ async function connectMongoWithRetry() {
     return;
   }
 
+  const isAtlas = /mongodb\.net/i.test(mongoUri) || /^mongodb\+srv:\/\//i.test(mongoUri);
+  console.log(`🗄️ MongoDB: connecting... (Atlas: ${isAtlas ? 'yes' : 'no'})`);
+
   _mongoConnectInFlight = true;
   try {
     await mongoose.connect(mongoUri, {
@@ -288,8 +349,13 @@ async function connectMongoWithRetry() {
 
         if (!shouldRunSeed) {
           const usersCount = await User.estimatedDocumentCount();
+          const centersCount = await Center.estimatedDocumentCount();
           const superadminExists = await User.exists({ email: 'superadmin@bmo.com' });
           const centerAdminExists = await User.exists({ email: 'admin@bmo.com' });
+
+          console.log(
+            `🌱 Seed check: users=${usersCount}, centers=${centersCount}, superadmin=${superadminExists ? 'yes' : 'no'}, admin=${centerAdminExists ? 'yes' : 'no'}`
+          );
 
           shouldRunSeed = usersCount === 0 || !superadminExists || !centerAdminExists;
         }
@@ -303,7 +369,7 @@ async function connectMongoWithRetry() {
           await seedDatabase();
           console.log('--- اكتمال ملء قاعدة البيانات ---');
         } else {
-          console.log('📊 Seed data موجودة. تم تخطي عملية seeding.');
+          console.log('📊 Seed data موجودة في قاعدة البيانات. تم تخطي عملية seeding.');
         }
       } catch (seedError) {
         console.error('❌ خطأ في ملء/فحص قاعدة البيانات:', seedError);
