@@ -307,6 +307,12 @@ process.on('uncaughtException', (err) => {
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
 let _mongoConnectInFlight = false;
 
+function getDbNameFromMongoUri(uri) {
+  if (!uri) return null;
+  const match = String(uri).match(/\/([^/?]+)(?:\?|$)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
 async function connectMongoWithRetry() {
   if (_mongoConnectInFlight) return;
   if (!mongoUri) {
@@ -315,16 +321,31 @@ async function connectMongoWithRetry() {
   }
 
   const isAtlas = /mongodb\.net/i.test(mongoUri) || /^mongodb\+srv:\/\//i.test(mongoUri);
-  console.log(`🗄️ MongoDB: connecting... (Atlas: ${isAtlas ? 'yes' : 'no'})`);
+  const uriDbName = getDbNameFromMongoUri(mongoUri);
+  const explicitDbName = String(process.env.MONGODB_DB_NAME || '').trim();
+  const selectedDbName = explicitDbName || uriDbName || 'bmo-database';
+  console.log(
+    `🗄️ MongoDB: connecting... (Atlas: ${isAtlas ? 'yes' : 'no'}, db: ${selectedDbName})`
+  );
 
   _mongoConnectInFlight = true;
   try {
-    await mongoose.connect(mongoUri, {
+    const connectOptions = {
       serverSelectionTimeoutMS: 30000,
       socketTimeoutMS: 45000,
-    });
+    };
+
+    // If URI already has a db name, keep it unless user explicitly overrides via MONGODB_DB_NAME.
+    if (explicitDbName || !uriDbName) {
+      connectOptions.dbName = selectedDbName;
+    }
+
+    await mongoose.connect(mongoUri, connectOptions);
 
     console.log('✅ متصل بقاعدة البيانات');
+    if (mongoose.connection?.db?.databaseName) {
+      console.log(`✅ DB selected: ${mongoose.connection.db.databaseName}`);
+    }
 
     if (mongoose.connection.readyState !== 1) {
       console.log('⏳ في انتظار اكتمال الاتصال بقاعدة البيانات...');
