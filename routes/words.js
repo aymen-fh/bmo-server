@@ -59,9 +59,10 @@ const upload = multer({
 // @route   POST /api/words
 // @desc    Create a new word or letter
 // @access  Private
+// دعم ربط كل كلمة/حرف بجلسة خطة (plan session) عبر sessionId اختياري
 router.post('/', protect, upload.single('image'), async (req, res) => {
     try {
-        const { text, contentType, difficulty, childId } = req.body;
+        const { text, contentType, difficulty, childId, sessionId } = req.body;
 
         if (!text || !childId) {
             return res.status(400).json({
@@ -84,9 +85,29 @@ router.post('/', protect, upload.single('image'), async (req, res) => {
         }
 
         const trimmed = text.trim();
+        // إذا sessionId موجود: أضف للكلمات/الحروف الخاصة بالجلسة (Exercise.kind=plan)
+        if (sessionId) {
+            const plan = await Exercise.findOne({ _id: sessionId, kind: 'plan', child: childId });
+            if (!plan) {
+                return res.status(404).json({ success: false, message: 'Plan session not found' });
+            }
+            const arr = type === 'word' ? plan.words : plan.letters;
+            const exists = arr.some(i => (i.word || i.letter) === trimmed);
+            if (exists) {
+                return res.status(400).json({ success: false, message: `${type === 'word' ? 'Word' : 'Letter'} already exists in this session` });
+            }
+            if (type === 'word') {
+                arr.push({ word: trimmed, difficulty: difficulty || 'easy', image: imagePath });
+            } else {
+                arr.push({ letter: trimmed, difficulty: difficulty || 'easy', image: imagePath });
+            }
+            await plan.save();
+            return res.status(201).json({ success: true });
+        }
+
+        // إذا لم يوجد sessionId: أضف للمحتوى العام (contentWords/contentLetters)
         const doc = await getOrCreateContentDoc(childId);
         const targetArr = type === 'word' ? doc.contentWords : doc.contentLetters;
-
         const exists = targetArr.some(i => i.text === trimmed);
         if (exists) {
             return res.status(400).json({
@@ -94,7 +115,6 @@ router.post('/', protect, upload.single('image'), async (req, res) => {
                 message: `${type === 'word' ? 'Word' : 'Letter'} already exists for this child`
             });
         }
-
         const created = targetArr.create({
             text: trimmed,
             difficulty: difficulty || 'easy',
@@ -103,19 +123,11 @@ router.post('/', protect, upload.single('image'), async (req, res) => {
         });
         targetArr.push(created);
         await doc.save();
-
         const word = asLegacyWordItem(created, type, childId);
-
-        res.status(201).json({
-            success: true,
-            word
-        });
+        res.status(201).json({ success: true, word });
     } catch (error) {
         console.error('Error creating word:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -163,28 +175,47 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // Get words for a specific child
+// دعم جلب محتوى Session محددة (عبر sessionId) أو المحتوى العام فقط
 router.get('/child/:childId', protect, async (req, res) => {
     try {
         const { childId } = req.params;
-        const { difficulty, contentType } = req.query;
+        const { difficulty, contentType, sessionId } = req.query;
 
-        const doc = await Exercise.findOne({ child: childId, kind: 'content' });
         const difficultyOk = (item) => !difficulty || item.difficulty === difficulty;
 
         let localWords = [];
         let localLetters = [];
 
-        if (!contentType || contentType === 'word') {
-            localWords = (doc?.contentWords || [])
-                .filter(difficultyOk)
-                .map(i => asLegacyWordItem(i, 'word', childId))
-                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        }
-        if (!contentType || contentType === 'letter') {
-            localLetters = (doc?.contentLetters || [])
-                .filter(difficultyOk)
-                .map(i => asLegacyWordItem(i, 'letter', childId))
-                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        if (sessionId) {
+            // جلب محتوى جلسة خطة محددة (plan)
+            const plan = await Exercise.findOne({ _id: sessionId, kind: 'plan', child: childId });
+            if (plan) {
+                if (!contentType || contentType === 'word') {
+                    localWords = (plan.words || [])
+                        .filter(difficultyOk)
+                        .map(i => ({ _id: i._id, text: i.word, contentType: 'word', difficulty: i.difficulty, image: i.image, child: childId, createdAt: i.createdAt }));
+                }
+                if (!contentType || contentType === 'letter') {
+                    localLetters = (plan.letters || [])
+                        .filter(difficultyOk)
+                        .map(i => ({ _id: i._id, text: i.letter, contentType: 'letter', difficulty: i.difficulty, image: i.image, child: childId, createdAt: i.createdAt }));
+                }
+            }
+        } else {
+            // جلب المحتوى العام (contentWords/contentLetters)
+            const doc = await Exercise.findOne({ child: childId, kind: 'content' });
+            if (!contentType || contentType === 'word') {
+                localWords = (doc?.contentWords || [])
+                    .filter(difficultyOk)
+                    .map(i => asLegacyWordItem(i, 'word', childId))
+                    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            }
+            if (!contentType || contentType === 'letter') {
+                localLetters = (doc?.contentLetters || [])
+                    .filter(difficultyOk)
+                    .map(i => asLegacyWordItem(i, 'letter', childId))
+                    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            }
         }
 
         res.json({
