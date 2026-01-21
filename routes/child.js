@@ -63,15 +63,16 @@ router.get('/', protect, async (req, res) => {
     let children;
 
     if (req.user.role === 'parent') {
-      console.log('👶 [CHILD ROUTE] Fetching children for parent (no active filter)...');
-      // جلب جميع الأطفال المرتبطين بالparent بدون فلترة active
-      children = await Child.find({ parent: req.user.id })
+      // دعم جلب الأطفال المرتبطين بولي أمر محدد عبر query param
+      const parentId = req.query.parentId || req.user.id;
+      console.log('👶 [CHILD ROUTE] Fetching children for parentId:', parentId);
+      children = await Child.find({ parent: parentId })
         .populate('assignedSpecialist', 'name email specialization phone profilePhoto')
         .populate({
           path: 'assignedSpecialist',
           populate: { path: 'center', select: 'name nameEn' }
         });
-      console.log('✅ [CHILD ROUTE] Found', children.length, 'children for parent');
+      console.log('✅ [CHILD ROUTE] Found', children.length, 'children for parentId', parentId);
     } else if (req.user.role === 'specialist') {
       console.log('👶 [CHILD ROUTE] Fetching children for specialist...');
       children = await Child.find({ assignedSpecialist: req.user.id }).populate('parent', 'name email phone profilePhoto');
