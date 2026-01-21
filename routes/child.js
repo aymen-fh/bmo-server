@@ -64,14 +64,32 @@ router.get('/', protect, async (req, res) => {
 
     if (req.user.role === 'parent') {
       // دعم جلب الأطفال المرتبطين بولي أمر محدد عبر query param
-      const parentId = req.query.parentId || req.user.id;
-      console.log('👶 [CHILD ROUTE] Fetching children for parentId:', parentId);
+      // Fetch parent to get linkedSpecialist
+      const parentUser = await User.findById(parentId)
+        .populate({
+          path: 'linkedSpecialist',
+          select: 'name email specialization phone profilePhoto center',
+          populate: { path: 'center', select: 'name nameEn' }
+        })
+        .lean();
+
       children = await Child.find({ parent: parentId })
         .populate('assignedSpecialist', 'name email specialization phone profilePhoto')
         .populate({
           path: 'assignedSpecialist',
           populate: { path: 'center', select: 'name nameEn' }
+        })
+        .lean();
+
+      // If child has no assignedSpecialist, use parent's linkedSpecialist
+      if (parentUser && parentUser.linkedSpecialist) {
+        children.forEach(child => {
+          if (!child.assignedSpecialist) {
+            child.assignedSpecialist = parentUser.linkedSpecialist;
+          }
         });
+      }
+
       console.log('✅ [CHILD ROUTE] Found', children.length, 'children for parentId', parentId);
     } else if (req.user.role === 'specialist') {
       console.log('👶 [CHILD ROUTE] Fetching children for specialist...');
@@ -85,7 +103,22 @@ router.get('/', protect, async (req, res) => {
           { assignedSpecialist: req.user.id },
           { parent: { $in: linkedParents } }
         ]
-      }).populate('parent', 'name email phone profilePhoto');
+      })
+        .populate('parent', 'name email phone profilePhoto')
+        .lean();
+
+      // For specialist view, if child is linked but not assigned, show current user as specialist
+      // We might need to fetch full specialist details if req.user is partial
+      const specialistDetails = await User.findById(req.user.id)
+        .select('name email specialization phone profilePhoto')
+        .populate('center', 'name nameEn')
+        .lean();
+
+      children.forEach(child => {
+        if (!child.assignedSpecialist) {
+          child.assignedSpecialist = specialistDetails;
+        }
+      });
 
       console.log('✅ [CHILD ROUTE] Found', children.length, 'children for specialist (assigned + linked)');
     } else {
