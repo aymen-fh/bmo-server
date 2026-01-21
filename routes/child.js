@@ -64,6 +64,7 @@ router.get('/', protect, async (req, res) => {
 
     if (req.user.role === 'parent') {
       // دعم جلب الأطفال المرتبطين بولي أمر محدد عبر query param
+      const parentId = req.query.parentId || req.user.id;
       // Fetch parent to get linkedSpecialist
       const parentUser = await User.findById(parentId)
         .populate({
