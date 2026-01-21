@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Progress = require('../models/Progress');
 const Child = require('../models/Child');
+const User = require('../models/User');
 const { protect } = require('../middleware/auth');
 
 // @route   GET /api/progress/child/:childId
@@ -26,11 +27,18 @@ router.get('/child/:childId', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     let progress = await Progress.findOne({ child: req.params.childId }).populate('child');
@@ -171,11 +179,18 @@ router.get('/stats/:childId', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     const progress = await Progress.findOne({ child: req.params.childId });
@@ -233,11 +248,18 @@ router.get('/sessions/:childId', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     const progress = await Progress.findOne({ child: req.params.childId });
@@ -301,11 +323,18 @@ router.get('/attempts/:childId', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     const rawLimit = parseInt(req.query.limit, 10);

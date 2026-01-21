@@ -75,8 +75,19 @@ router.get('/', protect, async (req, res) => {
       console.log('✅ [CHILD ROUTE] Found', children.length, 'children for parentId', parentId);
     } else if (req.user.role === 'specialist') {
       console.log('👶 [CHILD ROUTE] Fetching children for specialist...');
-      children = await Child.find({ assignedSpecialist: req.user.id }).populate('parent', 'name email phone profilePhoto');
-      console.log('✅ [CHILD ROUTE] Found', children.length, 'children for specialist');
+
+      // Get specialist's linked parents
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = specialist.linkedParents || [];
+
+      children = await Child.find({
+        $or: [
+          { assignedSpecialist: req.user.id },
+          { parent: { $in: linkedParents } }
+        ]
+      }).populate('parent', 'name email phone profilePhoto');
+
+      console.log('✅ [CHILD ROUTE] Found', children.length, 'children for specialist (assigned + linked)');
     } else {
       console.log('❌ [CHILD ROUTE] Unknown user role:', req.user.role);
       return res.status(403).json({
@@ -130,11 +141,23 @@ router.get('/:id', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist._id.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist._id.toString() === req.user.id;
+      let isLinked = false;
+
+      // Check if parent is linked
+      if (!isAssigned && child.parent) {
+        const specialist = await User.findById(req.user.id);
+        const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+        isLinked = linkedParents.includes(child.parent._id.toString());
+      }
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     res.json({
@@ -171,11 +194,23 @@ router.put('/:id', protect, async (req, res) => {
       });
     }
 
-    if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+    if (req.user.role === 'specialist') {
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      let isLinked = false;
+
+      // Check if parent is linked
+      if (!isAssigned && child.parent) {
+        const specialist = await User.findById(req.user.id);
+        const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+        isLinked = linkedParents.includes(child.parent.toString());
+      }
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     child = await Child.findByIdAndUpdate(req.params.id, req.body, {
