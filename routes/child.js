@@ -63,8 +63,10 @@ router.get('/', protect, async (req, res) => {
     let children;
 
     if (req.user.role === 'parent') {
-      console.log('👶 [CHILD ROUTE] Fetching children for parent...');
-      children = await Child.find({ parent: req.user.id }).populate('assignedSpecialist', 'name email specialization phone profilePhoto')
+      console.log('👶 [CHILD ROUTE] Fetching children for parent (no active filter)...');
+      // جلب جميع الأطفال المرتبطين بالparent بدون فلترة active
+      children = await Child.find({ parent: req.user.id })
+        .populate('assignedSpecialist', 'name email specialization phone profilePhoto')
         .populate({
           path: 'assignedSpecialist',
           populate: { path: 'center', select: 'name nameEn' }
