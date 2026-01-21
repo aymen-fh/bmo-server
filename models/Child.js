@@ -12,6 +12,10 @@ const childSchema = new mongoose.Schema({
     min: 4,
     max: 5
   },
+  birthDate: {
+    type: Date,
+    default: null
+  },
   gender: {
     type: String,
     enum: ['male', 'female'],

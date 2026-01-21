@@ -241,19 +241,30 @@ router.delete('/specialists/:id', protect, authorize('admin'), checkCenterAccess
 // ========================================
 
 // @route   GET /api/admin/parents
-// @desc    Get all parents linked to admin (as specialist)
+// @desc    Get all parents in the center (linked to any specialist in the center)
 // @access  Private (Admin)
-router.get('/parents', protect, authorize('admin'), async (req, res) => {
+router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        const admin = await User.findById(req.user.id)
-            .populate({
-                path: 'linkedParents',
-                select: '_id name email phone profilePhoto'
-            });
+        // Get all specialists in the center
+        const specialists = await User.find({
+            center: req.user.center,
+            role: 'specialist'
+        }).select('_id');
+
+        const specialistIds = specialists.map(s => s._id);
+        // Include admin itself (admins can also act as specialists)
+        specialistIds.push(req.user.id);
+
+        // Get all parents linked to any specialist in the center
+        const parents = await User.find({
+            linkedSpecialist: { $in: specialistIds },
+            role: 'parent'
+        }).select('_id name email phone profilePhoto');
 
         res.json({
             success: true,
-            parents: admin.linkedParents || []
+            count: parents.length,
+            parents
         });
     } catch (error) {
         res.status(500).json({
@@ -264,12 +275,26 @@ router.get('/parents', protect, authorize('admin'), async (req, res) => {
 });
 
 // @route   GET /api/admin/my-children
-// @desc    Get all children assigned to admin (as specialist)
+// @desc    Get all children in the center (assigned to any specialist in the center)
 // @access  Private (Admin)
-router.get('/my-children', protect, authorize('admin'), async (req, res) => {
+router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        const children = await Child.find({ assignedSpecialist: req.user.id })
-            .populate('parent', 'name email phone');
+        // Get all specialists in the center
+        const specialists = await User.find({
+            center: req.user.center,
+            role: 'specialist'
+        }).select('_id');
+
+        const specialistIds = specialists.map(s => s._id);
+        // Include admin itself (admins can also act as specialists)
+        specialistIds.push(req.user.id);
+
+        // Get all children assigned to any specialist in the center
+        const children = await Child.find({
+            assignedSpecialist: { $in: specialistIds }
+        })
+            .populate('parent', 'name email phone profilePhoto')
+            .populate('assignedSpecialist', 'name specialization');
 
         res.json({
             success: true,
@@ -322,17 +347,22 @@ router.get('/link-requests', protect, authorize('admin'), async (req, res) => {
 // @access  Private (Admin)
 router.get('/stats', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
+        // Get all specialists in the center
+        const specialists = await User.find({
+            center: req.user.center,
+            role: 'specialist'
+        }).select('_id');
+
+        const specialistIds = specialists.map(s => s._id);
+        // Include admin itself (admins can also act as specialists)
+        specialistIds.push(req.user.id);
+
+        // Count all entities in the center
         const [specialistsCount, parentsCount, childrenCount] = await Promise.all([
             User.countDocuments({ center: req.user.center, role: 'specialist' }),
-            User.countDocuments({ linkedSpecialist: req.user.id }),
-            Child.countDocuments({ assignedSpecialist: req.user.id })
+            User.countDocuments({ linkedSpecialist: { $in: specialistIds }, role: 'parent' }),
+            Child.countDocuments({ assignedSpecialist: { $in: specialistIds } })
         ]);
-
-        // Get center-wide stats
-        const centerSpecialistIds = req.center.specialists;
-        const centerChildrenCount = await Child.countDocuments({
-            assignedSpecialist: { $in: centerSpecialistIds }
-        });
 
         // Get recent specialists (Top 5)
         const recentSpecialists = await User.find({
@@ -350,7 +380,7 @@ router.get('/stats', protect, authorize('admin'), checkCenterAccess, async (req,
                 centerSpecialists: specialistsCount,
                 myParents: parentsCount,
                 myChildren: childrenCount,
-                centerChildren: centerChildrenCount
+                centerChildren: childrenCount // Same as myChildren now (all center children)
             },
             recentSpecialists
         });
