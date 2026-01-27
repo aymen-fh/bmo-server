@@ -252,27 +252,30 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📡 Accepting connections from all network interfaces`);
+const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID;
+if (!isTestEnv) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📡 Accepting connections from all network interfaces`);
 
-  const ips = getLocalIPv4Addresses();
-  if (ips.length) {
-    console.log('🌐 Device access URLs (same Wi‑Fi/LAN):');
-    for (const { name, address } of ips) {
-      console.log(`   - ${name}: http://${address}:${PORT}`);
+    const ips = getLocalIPv4Addresses();
+    if (ips.length) {
+      console.log('🌐 Device access URLs (same Wi‑Fi/LAN):');
+      for (const { name, address } of ips) {
+        console.log(`   - ${name}: http://${address}:${PORT}`);
+      }
+    } else {
+      console.log('🌐 Device access URLs: لم يتم العثور على IPv4 محلي (تحقق من الشبكة).');
     }
-  } else {
-    console.log('🌐 Device access URLs: لم يتم العثور على IPv4 محلي (تحقق من الشبكة).');
-  }
 
-  if (allowAllOrigins) {
-    console.log('🛡️ CORS: allow-all (CORS_ORIGINS not set)');
-  } else {
-    console.log(`🛡️ CORS: restricted to ${allowedOrigins.length} origin(s)`);
-    for (const o of allowedOrigins) console.log(`   - ${o}`);
-  }
-});
+    if (allowAllOrigins) {
+      console.log('🛡️ CORS: allow-all (CORS_ORIGINS not set)');
+    } else {
+      console.log(`🛡️ CORS: restricted to ${allowedOrigins.length} origin(s)`);
+      for (const o of allowedOrigins) console.log(`   - ${o}`);
+    }
+  });
+}
 
 // Graceful shutdown (Railway/hosts send SIGTERM on deploy/restart)
 function shutdown(signal) {
@@ -417,6 +420,14 @@ async function connectMongoWithRetry() {
   _mongoConnectInFlight = false;
 }
 
-connectMongoWithRetry();
+// In unit/black-box tests we don't want to open real DB connections (Atlas) nor
+// keep handles open that prevent Jest from exiting. If a test suite needs DB,
+// opt-in explicitly via ALLOW_MONGO_CONNECT_IN_TEST=true.
+const allowMongoConnectInTest =
+  String(process.env.ALLOW_MONGO_CONNECT_IN_TEST || '').toLowerCase() === 'true';
+
+if (!isTestEnv || allowMongoConnectInTest) {
+  connectMongoWithRetry();
+}
 
 module.exports = app;

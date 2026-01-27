@@ -44,6 +44,11 @@ const exerciseSchema = new mongoose.Schema({
   sessionIndex: { type: Number, default: null },
   sessionName: { type: String, trim: true, default: null },
   targetDuration: Number, // minutes per day
+  playDuration: Number, // minutes of play within session
+  breakDuration: Number, // minutes of rest within session
+  sessionDuration: Number, // minutes per session
+  totalDuration: Number, // total minutes for full session
+  maxAttempts: Number,
   startDate: { type: Date, default: Date.now },
   endDate: Date,
   active: { type: Boolean, default: true }

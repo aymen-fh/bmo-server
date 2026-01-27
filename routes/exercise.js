@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Exercise = require('../models/Exercise');
 const Child = require('../models/Child');
+const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
 
 // @route   POST /api/exercises
@@ -9,7 +10,11 @@ const { protect, authorize } = require('../middleware/auth');
 // @access  Private (Specialist)
 router.post('/', protect, authorize('specialist'), async (req, res) => {
   try {
-    const { childId, letters, words, targetDuration, endDate, sessionName } = req.body;
+    const { childId, letters, words, targetDuration, endDate, sessionName, playDuration, breakDuration, sessionDuration, totalDuration, maxAttempts } = req.body;
+    const toNumber = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    };
 
     const child = await Child.findById(childId);
 
@@ -21,10 +26,17 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
     }
 
     if (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+      const specialist = await User.findById(req.user.id).select('linkedParents');
+      const linkedParents = specialist?.linkedParents || [];
+      const parentId = child.parent?.toString();
+      const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
+
+      if (!isLinkedParentChild) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     // Ensure only one active plan at a time (kind: 'plan')
@@ -48,7 +60,12 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
       sessionName: sessionName || `Session ${nextSessionIndex}`,
       letters,
       words,
-      targetDuration,
+      ...(typeof targetDuration !== 'undefined' ? { targetDuration: toNumber(targetDuration) } : {}),
+      ...(typeof playDuration !== 'undefined' ? { playDuration: toNumber(playDuration) } : {}),
+      ...(typeof breakDuration !== 'undefined' ? { breakDuration: toNumber(breakDuration) } : {}),
+      ...(typeof sessionDuration !== 'undefined' ? { sessionDuration: toNumber(sessionDuration) } : {}),
+      ...(typeof totalDuration !== 'undefined' ? { totalDuration: toNumber(totalDuration) } : {}),
+      ...(typeof maxAttempts !== 'undefined' ? { maxAttempts: toNumber(maxAttempts) } : {}),
       endDate
     });
 
@@ -102,10 +119,16 @@ router.get('/child/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+      const specialist = await User.findById(req.user.id).select('linkedParents');
+      const linkedParents = specialist?.linkedParents || [];
+      const parentId = child.parent?.toString();
+      const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
+      if (!isLinkedParentChild) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
     }
 
     const includeInactive = String(req.query.includeInactive || '').toLowerCase() === '1'
