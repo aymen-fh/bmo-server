@@ -228,6 +228,62 @@ router.delete('/:id', protect, authorize('specialist'), async (req, res) => {
   }
 });
 
+// @route   POST /api/exercises/:id/reset
+// @desc    Reset session progress (delete all progress sessions for this plan)
+// @access  Private (Specialist)
+router.post('/:id/reset', protect, authorize('specialist'), async (req, res) => {
+  try {
+    const Progress = require('../models/Progress');
+    const exercise = await Exercise.findById(req.params.id);
+
+    if (!exercise) {
+      return res.status(404).json({
+        success: false,
+        message: 'Exercise not found'
+      });
+    }
+
+    if (exercise.specialist.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized'
+      });
+    }
+
+    // Find progress document for the child
+    const progress = await Progress.findOne({ child: exercise.child });
+
+    if (progress && Array.isArray(progress.sessions)) {
+      // Remove all sessions linked to this exercise plan
+      const initialCount = progress.sessions.length;
+      progress.sessions = progress.sessions.filter(session =>
+        !session.planExerciseId || session.planExerciseId.toString() !== req.params.id
+      );
+
+      const deletedCount = initialCount - progress.sessions.length;
+      await progress.save();
+
+      return res.json({
+        success: true,
+        message: `تم إعادة تعيين الجلسة بنجاح. تم حذف ${deletedCount} سجل.`,
+        deletedCount
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'لم يتم العثور على بيانات تقدم لحذفها.',
+      deletedCount: 0
+    });
+  } catch (error) {
+    console.error('Reset Session Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // @route   GET /api/exercises/letters/default
 // @desc    Get default Arabic letters with articulation points
 // @access  Public
@@ -286,19 +342,19 @@ router.get('/words/default', async (req, res) => {
       { word: 'حزين', translation: 'Sad', category: 'emotions' },
       { word: 'خايف', translation: 'Scared', category: 'emotions' },
       { word: 'زعلان', translation: 'Upset', category: 'emotions' },
-      
+
       // Basic needs
       { word: 'جعان', translation: 'Hungry', category: 'needs' },
       { word: 'عطشان', translation: 'Thirsty', category: 'needs' },
       { word: 'نعسان', translation: 'Sleepy', category: 'needs' },
       { word: 'تعبان', translation: 'Tired', category: 'needs' },
-      
+
       // Actions
       { word: 'ماشي', translation: 'Walking', category: 'actions' },
       { word: 'راكض', translation: 'Running', category: 'actions' },
       { word: 'قاعد', translation: 'Sitting', category: 'actions' },
       { word: 'واقف', translation: 'Standing', category: 'actions' },
-      
+
       // Family
       { word: 'بابا', translation: 'Dad', category: 'family' },
       { word: 'ماما', translation: 'Mom', category: 'family' },
