@@ -7,11 +7,14 @@ const Admin = require('../models/Admin');
 
 /**
  * Migration Script: Split Users into separate collections
+ * Uses insertMany to skip pre-save hooks (preserving password hashes)
  */
 
 async function migrateUsers() {
     try {
         const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
+        if (!MONGODB_URI) throw new Error('MONGODB_URI not found');
+
         await mongoose.connect(MONGODB_URI);
         console.log('🔌 Connected to MongoDB');
 
@@ -21,63 +24,45 @@ async function migrateUsers() {
         const users = await User.find({}).select('+password');
         console.log(`Found ${users.length} total users to migrate`);
 
-        let parentsCount = 0;
-        let specialistsCount = 0;
-        let adminsCount = 0;
+        // STEP 1: Clear corrupted collections to start fresh
+        // (Since this is a migration fix, we wipe the target collections)
+        await Parent.deleteMany({});
+        await Specialist.deleteMany({});
+        await Admin.deleteMany({});
+        console.log('🧹 Cleared existing Parent/Specialist/Admin collections.');
+
+        // arrays for bulk insert
+        const parents = [];
+        const specialists = [];
+        const admins = [];
 
         for (const user of users) {
             const userData = user.toObject();
-            delete userData.__v; // Remove version key
+            delete userData.__v;
 
-            // We MUST keep the same _id to maintain relationships
-            // Mongoose automatically casts string _id to ObjectId, but since it's already an ObjectId in userData, it's fine.
-
-            try {
-                if (userData.role === 'parent') {
-                    // Check if already exists to avoid duplicates if re-run
-                    const exists = await Parent.findById(userData._id);
-                    if (!exists) {
-                        await Parent.create(userData);
-                        parentsCount++;
-                        console.log(`   ✅ Migrated Parent: ${userData.name}`);
-                    } else {
-                        console.log(`   ℹ️  Skipped Parent (exists): ${userData.name}`);
-                    }
-                }
-                else if (userData.role === 'specialist') {
-                    const exists = await Specialist.findById(userData._id);
-                    if (!exists) {
-                        await Specialist.create(userData);
-                        specialistsCount++;
-                        console.log(`   ✅ Migrated Specialist: ${userData.name}`);
-                    } else {
-                        console.log(`   ℹ️  Skipped Specialist (exists): ${userData.name}`);
-                    }
-                }
-                else if (['admin', 'superadmin'].includes(userData.role)) {
-                    const exists = await Admin.findById(userData._id);
-                    if (!exists) {
-                        await Admin.create(userData);
-                        adminsCount++;
-                        console.log(`   ✅ Migrated Admin: ${userData.name}`);
-                    } else {
-                        console.log(`   ℹ️  Skipped Admin (exists): ${userData.name}`);
-                    }
-                }
-            } catch (err) {
-                console.error(`   ❌ Failed to migrate ${userData.name} (${userData.role}):`, err.message);
+            if (userData.role === 'parent') {
+                parents.push(userData);
+            } else if (userData.role === 'specialist') {
+                specialists.push(userData);
+            } else if (['admin', 'superadmin'].includes(userData.role)) {
+                admins.push(userData);
             }
         }
 
-        console.log('\n📊 Migration Summary:');
-        console.log(`   Parents: ${parentsCount}`);
-        console.log(`   Specialists: ${specialistsCount}`);
-        console.log(`   Admins: ${adminsCount}`);
+        if (parents.length > 0) {
+            await Parent.insertMany(parents);
+            console.log(`✅ Bulk Migrated ${parents.length} Parents`);
+        }
+        if (specialists.length > 0) {
+            await Specialist.insertMany(specialists);
+            console.log(`✅ Bulk Migrated ${specialists.length} Specialists`);
+        }
+        if (admins.length > 0) {
+            await Admin.insertMany(admins);
+            console.log(`✅ Bulk Migrated ${admins.length} Admins`);
+        }
+
         console.log('\n✅ Migration completed successfully!');
-
-        // IMPORTANT: We do NOT delete the old 'users' collection yet.
-        // We keep it as a backup until we verify everything works.
-
         process.exit(0);
 
     } catch (error) {
