@@ -21,7 +21,7 @@ const exerciseSchema = new mongoose.Schema({
   },
   specialist: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    ref: 'Specialist'
   },
   // Content library stored as a single document per child (kind: 'content')
   contentWords: [contentItemSchema],
