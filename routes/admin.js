@@ -65,13 +65,42 @@ router.get('/specialists', protect, authorize('admin'), checkCenterAccess, async
         const specialists = await Specialist.find({
             center: req.user.center
         })
-            .select('name email phone specialization linkedParents assignedChildren profilePhoto staffId')
+            .populate('linkedParents', 'name email')
+            .select('name email phone specialization linkedParents assignedChildren profilePhoto staffId createdAt')
             .lean();
 
         res.json({
             success: true,
             count: specialists.length,
             specialists
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// @route   GET /api/admin/specialists/:id
+// @desc    Get single specialist details
+// @access  Private (Admin)
+router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const specialist = await Specialist.findById(req.params.id)
+            .populate('linkedParents', 'name email phone profilePhoto')
+            .populate('assignedChildren', 'name age parent');
+
+        if (!specialist || specialist.center.toString() !== req.user.center.toString()) {
+            return res.status(404).json({
+                success: false,
+                message: 'الأخصائي غير موجود'
+            });
+        }
+
+        res.json({
+            success: true,
+            specialist
         });
     } catch (error) {
         res.status(500).json({
@@ -514,6 +543,219 @@ router.get('/specialists/:id/search-parents', protect, authorize('admin'), check
         res.json({ success: true, parents });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ========================================
+// DASHBOARD STATS
+// ========================================
+
+// @route   GET /api/admin/stats
+// @desc    Get dashboard statistics for admin
+// @access  Private (Admin)
+router.get('/stats', protect, authorize('admin'), async (req, res) => {
+    try {
+        let stats = {
+            specialists: 0,
+            parents: 0,
+            children: 0,
+            centerSpecialists: 0,
+            myParents: 0,
+            centerChildren: 0,
+            myChildren: 0
+        };
+        let recentSpecialists = [];
+
+        if (req.user.center) {
+            // Count specialists in center
+            const specialistsCount = await Specialist.countDocuments({ center: req.user.center });
+            stats.specialists = specialistsCount;
+            stats.centerSpecialists = specialistsCount;
+
+            // Get recent specialists
+            recentSpecialists = await Specialist.find({ center: req.user.center })
+                .select('name email createdAt profilePhoto')
+                .sort('-createdAt')
+                .limit(5)
+                .lean();
+
+            // Count all children assigned to specialists in this center
+            const centerSpecialists = await Specialist.find({ center: req.user.center }).select('_id');
+            const specialistIds = centerSpecialists.map(s => s._id);
+            const childrenCount = await Child.countDocuments({
+                assignedSpecialist: { $in: specialistIds }
+            });
+            stats.children = childrenCount;
+            stats.centerChildren = childrenCount;
+
+            // Count parents linked to specialists in this center
+            const allSpecialists = await Specialist.find({ center: req.user.center }).select('linkedParents');
+            const parentIdsSet = new Set();
+            allSpecialists.forEach(s => {
+                if (s.linkedParents && Array.isArray(s.linkedParents)) {
+                    s.linkedParents.forEach(p => parentIdsSet.add(p.toString()));
+                }
+            });
+            stats.parents = parentIdsSet.size;
+            stats.myParents = parentIdsSet.size;
+        }
+
+        res.json({
+            success: true,
+            stats,
+            recentSpecialists
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// @route   GET /api/admin/parents
+// @desc    Get all parents linked to specialists in this center
+// @access  Private (Admin)
+router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        // Get all specialists in center
+        const specialists = await Specialist.find({ center: req.user.center }).select('linkedParents');
+
+        // Collect all unique parent IDs
+        const parentIdsSet = new Set();
+        specialists.forEach(s => {
+            if (s.linkedParents && Array.isArray(s.linkedParents)) {
+                s.linkedParents.forEach(p => parentIdsSet.add(p.toString()));
+            }
+        });
+
+        // Fetch parent details
+        const parents = await Parent.find({ _id: { $in: Array.from(parentIdsSet) } })
+            .select('name email phone profilePhoto linkedSpecialist')
+            .populate('linkedSpecialist', 'name email')
+            .lean();
+
+        res.json({
+            success: true,
+            parents
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// @route   GET /api/admin/my-children
+// @desc    Get all children assigned to specialists in this center
+// @access  Private (Admin)
+router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        // Get all specialists in center
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
+        const specialistIds = specialists.map(s => s._id);
+
+        // Find all children assigned to these specialists
+        const children = await Child.find({
+            assignedSpecialist: { $in: specialistIds }
+        })
+            .populate('parent', 'name email phone')
+            .populate('assignedSpecialist', 'name email')
+            .lean();
+
+        res.json({
+            success: true,
+            children
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// @route   GET /api/admin/specialists/:id/search-parents
+// @desc    Search for parents to link to a specialist
+// @access  Private (Admin)
+router.get('/specialists/:id/search-parents', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { query } = req.query;
+        const specialist = await Specialist.findById(req.params.id);
+
+        if (!specialist || specialist.center.toString() !== req.user.center.toString()) {
+            return res.status(404).json({
+                success: false,
+                message: 'الأخصائي غير موجود'
+            });
+        }
+
+        // Get already linked parent IDs
+        const linkedParentIds = specialist.linkedParents || [];
+
+        // Build search query
+        let searchQuery = {
+            _id: { $nin: linkedParentIds }
+        };
+
+        if (query) {
+            searchQuery.$or = [
+                { email: { $regex: query.toLowerCase(), $options: 'i' } },
+                { name: { $regex: query, $options: 'i' } }
+            ];
+        }
+
+        const parents = await Parent.find(searchQuery)
+            .select('_id name email phone profilePhoto')
+            .limit(20)
+            .lean();
+
+        res.json({
+            success: true,
+            parents
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// @route   GET /api/centers/:id
+// @desc    Get center details by ID
+// @access  Private (Admin)
+router.get('/centers/:id', protect, authorize('admin'), async (req, res) => {
+    try {
+        const center = await Center.findById(req.params.id)
+            .populate('admin', 'name email phone')
+            .populate('specialists', 'name email specialization');
+
+        if (!center) {
+            return res.status(404).json({
+                success: false,
+                message: 'المركز غير موجود'
+            });
+        }
+
+        // Verify admin has access to this center
+        if (req.user.center && req.user.center.toString() !== center._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'غير مرخص بالوصول لهذا المركز'
+            });
+        }
+
+        res.json({
+            success: true,
+            center
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 });
 
