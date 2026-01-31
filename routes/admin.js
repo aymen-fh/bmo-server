@@ -3,6 +3,7 @@ const router = express.Router();
 const Admin = require('../models/Admin');
 const Specialist = require('../models/Specialist');
 const Parent = require('../models/Parent');
+const Child = require('../models/Child'); // Added Child model
 const Center = require('../models/Center');
 const LinkRequest = require('../models/LinkRequest');
 const { protect, authorize } = require('../middleware/auth');
@@ -61,10 +62,8 @@ router.get('/center', protect, authorize('admin'), checkCenterAccess, async (req
 // @access  Private (Admin)
 router.get('/specialists', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Optimized: Use lean() and avoid populating full objects just for counts
-        const specialists = await User.find({
-            center: req.user.center,
-            role: 'specialist'
+        const specialists = await Specialist.find({
+            center: req.user.center
         })
             .select('name email phone specialization linkedParents assignedChildren profilePhoto staffId')
             .lean();
@@ -96,9 +95,13 @@ router.post('/create-specialist', protect, authorize('admin'), checkCenterAccess
             });
         }
 
-        // Check if user already exists
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
-        if (existingUser) {
+        // Check if user already exists in ANY collection
+        const emailLower = email.toLowerCase();
+        const existingSpecialist = await Specialist.findOne({ email: emailLower });
+        const existingParent = await Parent.findOne({ email: emailLower });
+        const existingAdmin = await Admin.findOne({ email: emailLower });
+
+        if (existingSpecialist || existingParent || existingAdmin) {
             return res.status(400).json({
                 success: false,
                 message: 'البريد الإلكتروني مستخدم بالفعل'
@@ -106,9 +109,9 @@ router.post('/create-specialist', protect, authorize('admin'), checkCenterAccess
         }
 
         // Create specialist
-        const specialist = await User.create({
+        const specialist = await Specialist.create({
             name,
-            email: email.toLowerCase(),
+            email: emailLower,
             password,
             phone,
             role: 'specialist',
@@ -150,9 +153,9 @@ router.put('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
     try {
         const { name, phone, specialization, licenseNumber } = req.body;
 
-        const specialist = await User.findById(req.params.id);
+        const specialist = await Specialist.findById(req.params.id);
 
-        if (!specialist || specialist.role !== 'specialist') {
+        if (!specialist) {
             return res.status(404).json({
                 success: false,
                 message: 'الأخصائي غير موجود'
@@ -198,9 +201,9 @@ router.put('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
 // @access  Private (Admin)
 router.delete('/specialists/:id', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        const specialist = await User.findById(req.params.id);
+        const specialist = await Specialist.findById(req.params.id);
 
-        if (!specialist || specialist.role !== 'specialist') {
+        if (!specialist) {
             return res.status(404).json({
                 success: false,
                 message: 'الأخصائي غير موجود'
@@ -221,7 +224,7 @@ router.delete('/specialists/:id', protect, authorize('admin'), checkCenterAccess
         });
 
         // Clear center reference from specialist
-        specialist.center = null;
+        specialist.center = undefined;
         await specialist.save();
 
         res.json({
@@ -237,29 +240,147 @@ router.delete('/specialists/:id', protect, authorize('admin'), checkCenterAccess
 });
 
 // ========================================
+// LINKING / UNLINKING FUNCTIONALITY
+// ========================================
+
+// @route   POST /api/admin/specialists/:id/link-parent
+// @desc    Link a parent to a specialist
+// @access  Private (Admin)
+router.post('/specialists/:id/link-parent', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { parentId } = req.body;
+        const specialistId = req.params.id;
+
+        const specialist = await Specialist.findById(specialistId);
+        if (!specialist) {
+            return res.status(404).json({ success: false, message: 'الأخصائي غير موجود' });
+        }
+
+        if (String(specialist.center) !== String(req.user.center)) {
+            return res.status(403).json({ success: false, message: 'غير مصرح للوصول' });
+        }
+
+        const parent = await Parent.findById(parentId);
+        if (!parent) {
+            return res.status(404).json({ success: false, message: 'ولي الأمر غير موجود' });
+        }
+
+        // Add to specialist's linkedParents
+        await Specialist.findByIdAndUpdate(specialistId, {
+            $addToSet: { linkedParents: parentId }
+        });
+
+        // Set parent's linkedSpecialist
+        await Parent.findByIdAndUpdate(parentId, {
+            linkedSpecialist: specialistId
+        });
+
+        res.json({ success: true, message: 'تم ربط ولي الأمر بالأخصائي' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// @route   POST /api/admin/specialists/:id/unlink-parent/:parentId
+// @desc    Unlink a parent from a specialist
+// @access  Private (Admin)
+router.post('/specialists/:id/unlink-parent/:parentId', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { id: specialistId, parentId } = req.params;
+
+        const specialist = await Specialist.findById(specialistId);
+        if (!specialist) {
+            return res.status(404).json({ success: false, message: 'الأخصائي غير موجود' });
+        }
+
+        if (String(specialist.center) !== String(req.user.center)) {
+            return res.status(403).json({ success: false, message: 'غير مصرح للوصول' });
+        }
+
+        // Prevent Unlinking if we are just calling DELETE endpoint semantics
+        // Actually this is a POST to perform action
+
+        await Specialist.findByIdAndUpdate(specialistId, {
+            $pull: { linkedParents: parentId }
+        });
+
+        await Parent.findByIdAndUpdate(parentId, {
+            linkedSpecialist: null
+        });
+
+        res.json({ success: true, message: 'تم إلغاء ربط ولي الأمر' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// @route   POST /api/admin/specialists/:id/link-child
+// @desc    Assign a child to a specialist
+// @access  Private (Admin)
+router.post('/specialists/:id/link-child', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { childId } = req.body;
+        const specialistId = req.params.id;
+
+        const specialist = await Specialist.findById(specialistId);
+        if (!specialist || String(specialist.center) !== String(req.user.center)) {
+            return res.status(403).json({ success: false, message: 'غير مصرح للوصول' });
+        }
+
+        const child = await Child.findById(childId);
+        if (!child) {
+            return res.status(404).json({ success: false, message: 'الطفل غير موجود' });
+        }
+
+        child.assignedSpecialist = specialistId;
+        await child.save();
+
+        res.json({ success: true, message: 'تم تعيين الطفل للأخصائي' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// @route   POST /api/admin/specialists/:id/unlink-child/:childId
+// @desc    Unassign a child from a specialist
+// @access  Private (Admin)
+router.post('/specialists/:id/unlink-child/:childId', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { id: specialistId, childId } = req.params;
+
+        const specialist = await Specialist.findById(specialistId);
+        if (!specialist || String(specialist.center) !== String(req.user.center)) {
+            return res.status(403).json({ success: false, message: 'غير مصرح للوصول' });
+        }
+
+        const child = await Child.findById(childId);
+        if (!child) return res.status(404).json({ success: false, message: 'الطفل غير موجود' });
+
+        child.assignedSpecialist = undefined;
+        await child.save();
+
+        res.json({ success: true, message: 'تم إلغاء تعيين الطفل' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+
+// ========================================
 // ADMIN - SPECIALIST FUNCTIONALITY
-// (Admin can do everything a specialist can)
 // ========================================
 
 // @route   GET /api/admin/parents
-// @desc    Get all parents in the center (linked to any specialist in the center)
+// @desc    Get all parents in the center
 // @access  Private (Admin)
 router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Get all specialists in the center
-        const specialists = await User.find({
-            center: req.user.center,
-            role: 'specialist'
-        }).select('_id');
-
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
         const specialistIds = specialists.map(s => s._id);
-        // Include admin itself (admins can also act as specialists)
-        specialistIds.push(req.user.id);
 
-        // Get all parents linked to any specialist in the center
-        const parents = await User.find({
-            linkedSpecialist: { $in: specialistIds },
-            role: 'parent'
+        // Find parents linked to these specialists
+        const parents = await Parent.find({
+            linkedSpecialist: { $in: specialistIds }
         }).select('_id name email phone profilePhoto');
 
         res.json({
@@ -276,21 +397,13 @@ router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (re
 });
 
 // @route   GET /api/admin/my-children
-// @desc    Get all children in the center (assigned to any specialist in the center)
+// @desc    Get all children in the center
 // @access  Private (Admin)
 router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Get all specialists in the center
-        const specialists = await User.find({
-            center: req.user.center,
-            role: 'specialist'
-        }).select('_id');
-
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
         const specialistIds = specialists.map(s => s._id);
-        // Include admin itself (admins can also act as specialists)
-        specialistIds.push(req.user.id);
 
-        // Get all children assigned to any specialist in the center
         const children = await Child.find({
             assignedSpecialist: { $in: specialistIds }
         })
@@ -311,19 +424,18 @@ router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async
 });
 
 // @route   GET /api/admin/link-requests
-// @desc    Get all link requests sent to admin (as specialist)
+// @desc    Get all link requests sent to admin (for center specialists)
 // @access  Private (Admin)
 router.get('/link-requests', protect, authorize('admin'), async (req, res) => {
     try {
         const { status } = req.query;
 
+        // Admin sees requests addressed to them (to: req.user.id)
         let query = { to: req.user.id };
-        if (status) {
-            query.status = status;
-        }
+        if (status) query.status = status;
 
         const requests = await LinkRequest.find(query)
-            .populate('from', 'name email phone')
+            .populate('from', 'name email phone') // 'from' is usually a Specialist
             .sort('-createdAt');
 
         res.json({
@@ -348,28 +460,16 @@ router.get('/link-requests', protect, authorize('admin'), async (req, res) => {
 // @access  Private (Admin)
 router.get('/stats', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Get all specialists in the center
-        const specialists = await User.find({
-            center: req.user.center,
-            role: 'specialist'
-        }).select('_id');
-
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
         const specialistIds = specialists.map(s => s._id);
-        // Include admin itself (admins can also act as specialists)
-        specialistIds.push(req.user.id);
 
-        // Count all entities in the center
         const [specialistsCount, parentsCount, childrenCount] = await Promise.all([
-            User.countDocuments({ center: req.user.center, role: 'specialist' }),
-            User.countDocuments({ linkedSpecialist: { $in: specialistIds }, role: 'parent' }),
+            Specialist.countDocuments({ center: req.user.center }),
+            Parent.countDocuments({ linkedSpecialist: { $in: specialistIds } }),
             Child.countDocuments({ assignedSpecialist: { $in: specialistIds } })
         ]);
 
-        // Get recent specialists (Top 5)
-        const recentSpecialists = await User.find({
-            center: req.user.center,
-            role: 'specialist'
-        })
+        const recentSpecialists = await Specialist.find({ center: req.user.center })
             .sort({ createdAt: -1 })
             .limit(5)
             .select('name email specialization profilePhoto staffId')
@@ -381,7 +481,7 @@ router.get('/stats', protect, authorize('admin'), checkCenterAccess, async (req,
                 centerSpecialists: specialistsCount,
                 myParents: parentsCount,
                 myChildren: childrenCount,
-                centerChildren: childrenCount // Same as myChildren now (all center children)
+                centerChildren: childrenCount
             },
             recentSpecialists
         });
@@ -390,6 +490,30 @@ router.get('/stats', protect, authorize('admin'), checkCenterAccess, async (req,
             success: false,
             message: error.message
         });
+    }
+});
+
+// Search parents for specialist linkage
+router.get('/specialists/:id/search-parents', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const { search } = req.query;
+        if (!search) return res.json({ success: true, parents: [] });
+
+        const searchRegex = new RegExp(search, 'i');
+
+        // Find parents matching search who are NOT linked to any specialist yet
+        // OR we can allow re-linking. Let's assume re-linking is allowed but warn.
+        // Usually, we only want available parents.
+
+        const parents = await Parent.find({
+            $or: [{ name: searchRegex }, { email: searchRegex }]
+        })
+            .select('name email phone linkedSpecialist')
+            .limit(10);
+
+        res.json({ success: true, parents });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
