@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const User = require('../models/User');
+const Parent = require('../models/Parent');
+const Specialist = require('../models/Specialist');
+const Admin = require('../models/Admin');
 const { protect } = require('../middleware/auth');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const multer = require('multer');
@@ -42,9 +44,9 @@ const upload = multer({
 });
 
 
-// Generate JWT token
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+// Generate JWT token with Role
+const generateToken = (id, role) => {
+    return jwt.sign({ id, role }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRE
     });
 };
@@ -56,9 +58,14 @@ router.post('/register', async (req, res) => {
     try {
         const { name, email, password, role, phone, specialization, licenseNumber } = req.body;
 
-        // Check if user exists
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
+        const emailLower = email.toLowerCase();
+
+        // Check if user exists in ANY collection
+        const existingParent = await Parent.findOne({ email: emailLower });
+        const existingSpecialist = await Specialist.findOne({ email: emailLower });
+        const existingAdmin = await Admin.findOne({ email: emailLower });
+
+        if (existingParent || existingSpecialist || existingAdmin) {
             return res.status(400).json({
                 success: false,
                 message: 'User already exists'
@@ -67,18 +74,35 @@ router.post('/register', async (req, res) => {
 
         // Generate 6-digit verification code
         const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        let user;
 
-        // Create user
-        const user = await User.create({
-            name,
-            email,
-            password,
-            role,
-            phone,
-            specialization: role === 'specialist' ? specialization : undefined,
-            licenseNumber: role === 'specialist' ? licenseNumber : undefined,
-            verificationToken: verificationCode
-        });
+        // Create user based on role
+        if (role === 'parent') {
+            user = await Parent.create({
+                name,
+                email: emailLower,
+                password,
+                role: 'parent',
+                phone,
+                verificationToken: verificationCode
+            });
+        } else if (role === 'specialist') {
+            user = await Specialist.create({
+                name,
+                email: emailLower,
+                password,
+                role: 'specialist',
+                phone,
+                specialization,
+                licenseNumber,
+                verificationToken: verificationCode
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid role for registration'
+            });
+        }
 
         // Send verification email
         try {
@@ -86,11 +110,9 @@ router.post('/register', async (req, res) => {
             console.log('✅ Verification email sent successfully to:', user.email);
         } catch (emailError) {
             console.error('❌ Email sending failed during registration:', emailError.message);
-            // Don't fail registration if email fails, but log it and continue
-            // User can still resend verification later
         }
 
-        const token = generateToken(user._id);
+        const token = generateToken(user._id, user.role);
 
         res.status(201).json({
             success: true,
@@ -112,7 +134,7 @@ router.post('/register', async (req, res) => {
 });
 
 // @route   POST /api/auth/login
-// @desc    Login user
+// @desc    Login user (searches all collections)
 // @access  Public
 router.post('/login', async (req, res) => {
     try {
@@ -125,7 +147,24 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+        const emailLower = email.toLowerCase();
+
+        // Strategy: Search in all collections
+        // 1. Try Parent
+        let user = await Parent.findOne({ email: emailLower }).select('+password');
+        let role = 'parent';
+
+        // 2. Try Specialist
+        if (!user) {
+            user = await Specialist.findOne({ email: emailLower }).select('+password');
+            role = 'specialist';
+        }
+
+        // 3. Try Admin
+        if (!user) {
+            user = await Admin.findOne({ email: emailLower }).select('+password');
+            role = user ? user.role : 'admin'; // admin or superadmin
+        }
 
         if (!user || !(await user.comparePassword(password))) {
             return res.status(401).json({
@@ -134,7 +173,7 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        const token = generateToken(user._id);
+        const token = generateToken(user._id, role);
 
         res.json({
             success: true,
@@ -143,7 +182,7 @@ router.post('/login', async (req, res) => {
                 id: user._id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: role
             }
         });
     } catch (error) {
@@ -159,7 +198,14 @@ router.post('/login', async (req, res) => {
 // @access  Private
 router.get('/me', protect, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).populate('assignedChildren');
+        // req.user is already fetched by 'protect' middleware from the correct collection
+        // Just need to populate if necessary
+        let user = req.user;
+
+        if (user.role === 'parent') {
+            user = await Parent.findById(user._id).populate('assignedChildren');
+        }
+
         res.json({
             success: true,
             user
@@ -178,37 +224,30 @@ router.get('/me', protect, async (req, res) => {
 router.put('/profile', protect, upload.single('photo'), async (req, res) => {
     try {
         const { name, email, phone } = req.body;
-        console.log('Update Profile Body:', req.body);
-        console.log('Update Profile File:', req.file);
 
-        const user = await User.findById(req.user.id);
+        // Use req.user (already fetched)
+        let user = req.user;
 
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-
-        // Check if email is being changed and if it's already taken
+        // Check uniqueness if email changed
         if (email && email !== user.email) {
-            const existingUser = await User.findOne({ email });
-            if (existingUser) {
+            const existsP = await Parent.findOne({ email });
+            const existsS = await Specialist.findOne({ email });
+            const existsA = await Admin.findOne({ email });
+
+            if (existsP || existsS || existsA) {
                 return res.status(400).json({
                     success: false,
                     message: 'Email already in use'
                 });
             }
             user.email = email;
-            user.emailVerified = false; // Require re-verification for new email
+            user.emailVerified = false;
         }
 
         if (name) user.name = name;
         if (phone !== undefined) user.phone = phone;
 
-        // Handle File Upload (save to profilePhoto)
         if (req.file) {
-            // Store relative path (normalized to forward slashes)
             user.profilePhoto = req.file.path.replace(/\\/g, "/");
         }
 
@@ -249,7 +288,11 @@ router.put('/change-password', protect, async (req, res) => {
             });
         }
 
-        const user = await User.findById(req.user.id).select('+password');
+        // Must re-fetch with password selected
+        let user;
+        if (req.user.role === 'parent') user = await Parent.findById(req.user.id).select('+password');
+        else if (req.user.role === 'specialist') user = await Specialist.findById(req.user.id).select('+password');
+        else user = await Admin.findById(req.user.id).select('+password');
 
         if (!(await user.comparePassword(currentPassword))) {
             return res.status(400).json({
@@ -273,100 +316,75 @@ router.put('/change-password', protect, async (req, res) => {
     }
 });
 
+// Helper to find user by email across all collections
+async function findUserByEmail(email) {
+    let user = await Parent.findOne({ email });
+    if (user) return user;
+    user = await Specialist.findOne({ email });
+    if (user) return user;
+    user = await Admin.findOne({ email });
+    return user;
+}
+
 // @route   POST /api/auth/forgot-password
 // @desc    Send password reset email with 6-digit code
 // @access  Public
 router.post('/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
+        if (!email) return res.status(400).json({ message: 'Please provide email' });
 
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide email'
-            });
-        }
-
-        const user = await User.findOne({ email });
+        const user = await findUserByEmail(email);
 
         if (!user) {
-            // Don't reveal if email exists or not for security
             return res.json({
                 success: true,
                 message: 'If an account with that email exists, a password reset code has been sent'
             });
         }
 
-        // Generate 6-digit reset code
         const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.resetPasswordToken = resetCode;
         user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
 
         await user.save();
 
-        // Send reset email with code
         try {
             await sendPasswordResetEmail(user.email, resetCode);
-            console.log('✅ Password reset email sent successfully to:', user.email);
         } catch (emailError) {
-            console.error('❌ Email sending failed during password reset:', emailError.message);
+            console.error('❌ Email sending failed:', emailError.message);
             user.resetPasswordToken = undefined;
             user.resetPasswordExpire = undefined;
             await user.save();
-            return res.status(500).json({
-                success: false,
-                message: 'Email could not be sent'
-            });
+            return res.status(500).json({ success: false, message: 'Email could not be sent' });
         }
 
-        res.json({
-            success: true,
-            message: 'Password reset code sent to your email'
-        });
+        res.json({ success: true, message: 'Password reset code sent to your email' });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
-// 🔑 @route POST /api/auth/verify-reset-token
-// @desc    Verify if the 6-digit password reset token is valid and not expired
+// @route   POST /api/auth/verify-reset-token
+// @desc    Verify if the 6-digit password reset token is valid
 // @access  Public
 router.post('/verify-reset-token', async (req, res) => {
     try {
         const { token } = req.body;
+        if (!token) return res.status(400).json({ message: 'Reset token is required' });
 
-        if (!token) {
-            return res.status(400).json({
-                success: false,
-                message: 'Reset token is required'
-            });
-        }
-
-        const user = await User.findOne({
-            resetPasswordToken: token,
-            resetPasswordExpire: { $gt: Date.now() } // تحقق من عدم انتهاء الصلاحية
-        });
+        // Search in all collections for this token
+        let user = await Parent.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
+        if (!user) user = await Specialist.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
+        if (!user) user = await Admin.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
 
         if (!user) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid or expired code.'
-            });
+            return res.status(400).json({ success: false, message: 'Invalid or expired code.' });
         }
 
-        // إذا تم العثور على المستخدم والرمز صالح:
-        res.json({
-            success: true,
-            message: 'Token verified successfully.'
-        });
+        res.json({ success: true, message: 'Token verified successfully.' });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -376,42 +394,22 @@ router.post('/verify-reset-token', async (req, res) => {
 router.put('/reset-password', async (req, res) => {
     try {
         const { token, newPassword } = req.body;
+        if (!token || !newPassword) return res.status(400).json({ message: 'Please provide code and new password' });
 
-        if (!token || !newPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide code and new password'
-            });
-        }
+        let user = await Parent.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
+        if (!user) user = await Specialist.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
+        if (!user) user = await Admin.findOne({ resetPasswordToken: token, resetPasswordExpire: { $gt: Date.now() } });
 
-        const user = await User.findOne({
-            resetPasswordToken: token,
-            resetPasswordExpire: { $gt: Date.now() }
-        });
-
-        if (!user) {
-            // ملاحظة: هذا المسار لا يجب أن ينجح إذا تم بالفعل التحقق من الرمز في الخطوة السابقة، 
-            // ولكن نتركه كفحص أمان أخير.
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid or expired code'
-            });
-        }
+        if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired code' });
 
         user.password = newPassword;
         user.resetPasswordToken = undefined;
         user.resetPasswordExpire = undefined;
         await user.save();
 
-        res.json({
-            success: true,
-            message: 'Password reset successfully'
-        });
+        res.json({ success: true, message: 'Password reset successfully' });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -421,36 +419,21 @@ router.put('/reset-password', async (req, res) => {
 router.post('/verify-email', async (req, res) => {
     try {
         const { token } = req.body;
+        if (!token) return res.status(400).json({ message: 'Verification token is required' });
 
-        if (!token) {
-            return res.status(400).json({
-                success: false,
-                message: 'Verification token is required'
-            });
-        }
+        let user = await Parent.findOne({ verificationToken: token });
+        if (!user) user = await Specialist.findOne({ verificationToken: token });
+        if (!user) user = await Admin.findOne({ verificationToken: token });
 
-        const user = await User.findOne({ verificationToken: token });
-
-        if (!user) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid verification token'
-            });
-        }
+        if (!user) return res.status(400).json({ success: false, message: 'Invalid verification token' });
 
         user.emailVerified = true;
         user.verificationToken = undefined;
         await user.save();
 
-        res.json({
-            success: true,
-            message: 'Email verified successfully'
-        });
+        res.json({ success: true, message: 'Email verified successfully' });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -459,14 +442,7 @@ router.post('/verify-email', async (req, res) => {
 // @access  Private
 router.post('/resend-verification', protect, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
+        const user = req.user; // Already fetched by middleware
 
         if (user.emailVerified) {
             return res.status(400).json({
@@ -475,32 +451,20 @@ router.post('/resend-verification', protect, async (req, res) => {
             });
         }
 
-        // Generate new 6-digit verification code
         const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.verificationToken = verificationCode;
         await user.save();
 
-        // Send verification email
         try {
             await sendVerificationEmail(user.email, verificationCode);
-            console.log('✅ Verification email resent successfully to:', user.email);
         } catch (emailError) {
-            console.error('❌ Email sending failed during resend:', emailError.message);
-            return res.status(500).json({
-                success: false,
-                message: 'Email could not be sent'
-            });
+            console.error('❌ Email sending failed:', emailError.message);
+            return res.status(500).json({ success: false, message: 'Email could not be sent' });
         }
 
-        res.json({
-            success: true,
-            message: 'Verification email sent'
-        });
+        res.json({ success: true, message: 'Verification email sent' });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -509,26 +473,15 @@ router.post('/resend-verification', protect, async (req, res) => {
 // @access  Private
 router.post('/refresh-token', protect, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-
-        const token = generateToken(user._id);
+        const user = req.user;
+        const token = generateToken(user._id, user.role);
 
         res.json({
             success: true,
             token
         });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -537,7 +490,12 @@ router.post('/refresh-token', protect, async (req, res) => {
 // @access  Private (Parent only)
 router.get('/my-specialist', protect, async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).populate({
+        if (req.user.role !== 'parent') {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+
+        // We need to populate linkedSpecialist, so re-fetch from Parent model
+        const user = await Parent.findById(req.user.id).populate({
             path: 'linkedSpecialist',
             select: 'name email phone specialization profilePhoto center',
             populate: {
@@ -546,14 +504,7 @@ router.get('/my-specialist', protect, async (req, res) => {
             }
         });
 
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-
-        if (!user.linkedSpecialist) {
+        if (!user || !user.linkedSpecialist) {
             return res.status(404).json({
                 success: false,
                 message: 'No specialist linked to this account'
@@ -565,10 +516,7 @@ router.get('/my-specialist', protect, async (req, res) => {
             specialist: user.linkedSpecialist
         });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 

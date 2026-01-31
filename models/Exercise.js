@@ -2,8 +2,8 @@ const mongoose = require('mongoose');
 
 const contentItemSchema = new mongoose.Schema({
   text: { type: String, required: true, trim: true },
-  difficulty: { type: String, enum: ['easy', 'medium', 'hard'], default: 'easy' },
-  image: { type: String, default: 'default-word.png' },
+  difficulty: { type: String, enum: ['easy', 'medium', 'hard'] },
+  image: { type: String },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   createdAt: { type: Date, default: Date.now }
 }, { _id: true });
@@ -17,41 +17,61 @@ const exerciseSchema = new mongoose.Schema({
   kind: {
     type: String,
     enum: ['plan', 'content'],
-    default: 'plan'
+    required: true
   },
   specialist: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
   // Content library stored as a single document per child (kind: 'content')
-  // This replaces storing each word/letter as a separate document in the Word collection.
   contentWords: [contentItemSchema],
   contentLetters: [contentItemSchema],
   letters: [{
     letter: String,
-    articulationPoint: String, // مخرج الحرف
-    vowels: [String], // حركات: أَ، إِ، أُ، إْ
+    articulationPoint: String,
+    vowels: [String],
     difficulty: { type: String, enum: ['easy', 'medium', 'hard'] }
   }],
   words: [{
     word: String,
     translation: String,
-    category: String, // emotions, needs, actions
+    category: String,
     difficulty: { type: String, enum: ['easy', 'medium', 'hard'] }
   }],
-  // Numbered plan sessions: Session 1, Session 2, ...
-  // Only meaningful for kind: 'plan'.
-  sessionIndex: { type: Number, default: null },
-  sessionName: { type: String, trim: true, default: null },
-  targetDuration: Number, // minutes per day
-  playDuration: Number, // minutes of play within session
-  breakDuration: Number, // minutes of rest within session
-  sessionDuration: Number, // minutes per session
-  totalDuration: Number, // total minutes for full session
-  maxAttempts: Number,
-  startDate: { type: Date, default: Date.now },
-  endDate: Date,
-  active: { type: Boolean, default: true }
+
+  // Session metadata (for kind: 'plan')
+  sessionIndex: { type: Number },
+  sessionName: { type: String, trim: true },
+
+  // 🎯 PRIMARY SESSION SETTINGS - NO DEFAULTS
+  // The specialist MUST specify these values explicitly
+  targetDuration: {
+    type: Number,
+    required: function () { return this.kind === 'plan'; },
+    min: 1
+  },
+  breakDuration: {
+    type: Number,
+    required: function () { return this.kind === 'plan'; },
+    min: 0
+  },
+  maxAttempts: {
+    type: Number,
+    required: function () { return this.kind === 'plan'; },
+    min: 1
+  },
+
+  // ⚠️ DEPRECATED FIELDS - Kept for backward compatibility
+  // These will be removed in a future version
+  playDuration: { type: Number },
+  sessionDuration: { type: Number },
+  totalDuration: { type: Number },
+
+  // Session dates
+  startDate: { type: Date },
+  endDate: { type: Date },
+  allowedDays: [Number], // 0=Sunday, 1=Monday, ...
+  active: { type: Boolean, required: true }
 }, {
   timestamps: true
 });

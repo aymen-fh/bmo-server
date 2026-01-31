@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const Specialist = require('../models/Specialist');
+const Parent = require('../models/Parent');
 const Child = require('../models/Child');
-const User = require('../models/User');
-const LinkRequest = require('../models/LinkRequest');
-const Notification = require('../models/Notification');
 const { protect, authorize } = require('../middleware/auth');
+const Notification = require('../models/Notification');
 
 // @route   GET /api/specialists/pending-requests
 // @desc    Get children with pending specialist requests
@@ -60,7 +60,7 @@ router.post('/accept-child/:childId', protect, authorize('specialist'), async (r
     await child.save();
 
     // Add child to specialist's assigned children
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $addToSet: { assignedChildren: child._id }
     });
 
@@ -127,7 +127,7 @@ router.post('/set-duration/:childId', protect, authorize('specialist'), async (r
     let isLinked = false;
 
     if (!isAssigned && child.parent) {
-      const specialist = await User.findById(req.user.id);
+      const specialist = await Specialist.findById(req.user.id);
       const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       isLinked = linkedParents.includes(child.parent.toString());
     }
@@ -162,7 +162,7 @@ router.post('/set-duration/:childId', protect, authorize('specialist'), async (r
     // 🔔 Create Notification for Parent (if child has parent)
     try {
       if (child.parent) {
-        const specialist = await User.findById(req.user.id);
+        const specialist = await Specialist.findById(req.user.id);
         const Notification = require('../models/Notification');
         await Notification.create({
           recipient: child.parent,

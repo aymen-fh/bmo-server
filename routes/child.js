@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Child = require('../models/Child');
-const User = require('../models/User');
+const Parent = require('../models/Parent');
+const Specialist = require('../models/Specialist');
 const Progress = require('../models/Progress');
 const { protect, authorize } = require('../middleware/auth');
 

@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
+const Parent = require('../models/Parent');
+const Child = require('../models/Child');
 const LinkRequest = require('../models/LinkRequest');
 const Notification = require('../models/Notification');
-const Child = require('../models/Child');
+const Specialist = require('../models/Specialist'); // Needed for search
 const { protect, authorize } = require('../middleware/auth');
 
 // @route   GET /api/parents/search-specialists
@@ -12,7 +13,7 @@ const { protect, authorize } = require('../middleware/auth');
 router.get('/search-specialists', protect, authorize('parent'), async (req, res) => {
     try {
         const { query } = req.query;
-        const parent = await User.findById(req.user.id);
+        const parent = await Parent.findById(req.user.id);
 
         // Build search query
         let searchQuery = {
@@ -32,7 +33,7 @@ router.get('/search-specialists', protect, authorize('parent'), async (req, res)
             ];
         }
 
-        const specialists = await User.find(searchQuery)
+        const specialists = await Specialist.find(searchQuery)
             .select('_id name email phone specialization profilePhoto bio center')
             .populate('center', '_id name nameEn address phone email description')
             .limit(30);
@@ -113,7 +114,7 @@ router.post('/send-link-request', protect, authorize('parent'), async (req, res)
         }
 
         // Check if specialist exists
-        const specialist = await User.findById(specialistId);
+        const specialist = await Specialist.findById(specialistId);
         if (!specialist || specialist.role !== 'specialist') {
             return res.status(404).json({
                 success: false,
@@ -254,7 +255,7 @@ router.delete('/cancel-request/:requestId', protect, authorize('parent'), async 
 // @access  Private (Parent)
 router.get('/my-specialist', protect, authorize('parent'), async (req, res) => {
     try {
-        const user = await User.findById(req.user.id)
+        const user = await Parent.findById(req.user.id)
             .populate('linkedSpecialist', 'name email phone specialization');
 
         if (!user.linkedSpecialist) {
@@ -363,7 +364,7 @@ router.get('/notifications/unread/count', protect, authorize('parent'), async (r
 // @access  Private (Parent)
 router.delete('/unlink-specialist', protect, authorize('parent'), async (req, res) => {
     try {
-        const parent = await User.findById(req.user.id);
+        const parent = await Parent.findById(req.user.id);
 
         if (!parent.linkedSpecialist) {
             return res.status(400).json({
@@ -411,7 +412,7 @@ router.delete('/unlink-specialist', protect, authorize('parent'), async (req, re
                 type: 'warning',
                 title: 'تم إلغاء الارتباط',
                 message: childIds.length
-                    ? `قام ولي الأمر ${parent.name} بإلغاء التعامل. تم فصل الأطفال: ${childNames || 'بدون أسماء'}.`
+                    ? `قام ولي الأمر ${parent.name} بإلغاء التعامل.تم فصل الأطفال: ${childNames || 'بدون أسماء'}.`
                     : `قام ولي الأمر ${parent.name} بإلغاء التعامل.`,
                 data: {
                     parentId: parent._id,

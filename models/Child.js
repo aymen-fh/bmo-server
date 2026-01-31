@@ -13,8 +13,7 @@ const childSchema = new mongoose.Schema({
     max: 5
   },
   birthDate: {
-    type: Date,
-    default: null
+    type: Date
   },
   gender: {
     type: String,
@@ -23,42 +22,38 @@ const childSchema = new mongoose.Schema({
   },
   parent: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Parent',
     required: true
   },
   assignedSpecialist: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    default: null
+    ref: 'Specialist'
   },
   specialistRequestStatus: {
     type: String,
-    enum: ['none', 'pending', 'approved', 'rejected'],
-    default: 'none'
+    enum: ['none', 'pending', 'approved', 'rejected']
   },
   dailyPlayDuration: {
-    type: Number,
-    default: 60 // minutes
+    type: Number // NO DEFAULT - must be set explicitly
   },
+  // ⚠️ sessionStructure is DEPRECATED
+  // Session settings should come from Exercise (kind: 'plan') documents
+  // This is kept only as a fallback for children without active plans
   sessionStructure: {
-    playDuration: { type: Number, default: 15 },
-    breakDuration: { type: Number, default: 10 },
-    encouragementMessages: { type: Boolean, default: true },
-    // Max attempts allowed per session (Child-Game expects this key)
-    maxAttempts: { type: Number, default: 30 }
+    playDuration: { type: Number },
+    breakDuration: { type: Number },
+    encouragementMessages: { type: Boolean },
+    maxAttempts: { type: Number }
   },
-  // Optional schedule to control WHEN the child can play.
-  // Stored as local-time windows in HH:mm.
+  // Optional schedule to control WHEN the child can play
   playSchedule: {
-    enabled: { type: Boolean, default: false },
-    // 0=Sunday .. 6=Saturday
+    enabled: { type: Boolean },
     allowedDays: [{ type: Number, min: 0, max: 6 }],
     windows: [{
-      start: { type: String, trim: true }, // 'HH:mm'
-      end: { type: String, trim: true }    // 'HH:mm'
+      start: { type: String, trim: true },
+      end: { type: String, trim: true }
     }],
-    // If true, the game should block play outside schedule.
-    enforce: { type: Boolean, default: true }
+    enforce: { type: Boolean }
   },
   targetLetters: [{
     type: String,
@@ -70,8 +65,7 @@ const childSchema = new mongoose.Schema({
   }],
   difficultyLevel: {
     type: String,
-    enum: ['beginner', 'intermediate', 'advanced'],
-    default: 'beginner'
+    enum: ['beginner', 'intermediate', 'advanced']
   },
   // Custom child ID for search
   childId: {
@@ -79,17 +73,13 @@ const childSchema = new mongoose.Schema({
     unique: true,
     trim: true
   },
-
-  // Default avatar selection (shared across apps by ID)
-  // Example IDs: avatar_01, avatar_02, ...
+  // Default avatar selection
   avatarId: {
     type: String,
-    trim: true,
-    default: null
+    trim: true
   },
   active: {
-    type: Boolean,
-    default: true
+    type: Boolean
   }
 }, {
   timestamps: true
@@ -102,10 +92,11 @@ childSchema.pre('save', async function (next) {
     this.childId = `CH-${String(count + 1).padStart(4, '0')}`;
   }
 
-  // Set a sensible default avatarId if not provided.
+  // Set avatarId based on gender if not provided
   if (this.isNew && !this.avatarId) {
     this.avatarId = this.gender === 'female' ? 'avatar_02' : 'avatar_01';
   }
+
   next();
 });
 

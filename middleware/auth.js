@@ -1,51 +1,51 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const Parent = require('../models/Parent');
+const Specialist = require('../models/Specialist');
+const Admin = require('../models/Admin');
 
 exports.protect = async (req, res, next) => {
   try {
-    console.log('🔐 [AUTH MIDDLEWARE] protect() called for route:', req.method, req.path);
-    console.log('🔐 [AUTH MIDDLEWARE] Headers present:', !!req.headers.authorization);
-
     let token;
-
-    // Check for Passport Session first (for web portal access)
-    if (req.isAuthenticated && req.isAuthenticated()) {
-      console.log('✅ [AUTH MIDDLEWARE] Passport Session authenticated:', req.user.name);
-      return next();
-    }
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
-      console.log('🔐 [AUTH MIDDLEWARE] Token extracted from header');
     }
 
     if (!token) {
-      console.log('❌ [AUTH MIDDLEWARE] No token found in request');
       return res.status(401).json({
         success: false,
         message: 'Not authorized to access this route'
       });
     }
 
-    console.log('🔐 [AUTH MIDDLEWARE] Verifying JWT token...');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('✅ [AUTH MIDDLEWARE] JWT verified, user ID:', decoded.id);
 
-    console.log('🔐 [AUTH MIDDLEWARE] Fetching user from database...');
-    req.user = await User.findById(decoded.id);
+    // Determine which collection to query based on role in token
+    let user;
 
-    if (!req.user) {
-      console.log('❌ [AUTH MIDDLEWARE] User not found in database for ID:', decoded.id);
+    if (decoded.role === 'parent') {
+      user = await Parent.findById(decoded.id);
+    } else if (decoded.role === 'specialist') {
+      user = await Specialist.findById(decoded.id);
+    } else if (['admin', 'superadmin'].includes(decoded.role)) {
+      user = await Admin.findById(decoded.id);
+    } else {
+      // Fallback for legacy tokens or unknown roles: try finding in all (expensive but safe)
+      user = await Parent.findById(decoded.id) ||
+        await Specialist.findById(decoded.id) ||
+        await Admin.findById(decoded.id);
+    }
+
+    if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found or token invalid'
       });
     }
 
-    console.log('✅ [AUTH MIDDLEWARE] User authenticated:', req.user.name, '(Role:', req.user.role, ')');
+    req.user = user;
     next();
   } catch (error) {
-    console.log('❌ [AUTH MIDDLEWARE] Error during authentication:', error.message);
     return res.status(401).json({
       success: false,
       message: 'Not authorized to access this route'

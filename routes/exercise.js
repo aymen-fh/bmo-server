@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Exercise = require('../models/Exercise');
 const Child = require('../models/Child');
-const User = require('../models/User');
+const Specialist = require('../models/Specialist');
+const Parent = require('../models/Parent'); // In case parents need read access
 const { protect, authorize } = require('../middleware/auth');
 
 // @route   POST /api/exercises
@@ -10,11 +11,20 @@ const { protect, authorize } = require('../middleware/auth');
 // @access  Private (Specialist)
 router.post('/', protect, authorize('specialist'), async (req, res) => {
   try {
-    const { childId, letters, words, targetDuration, endDate, sessionName, playDuration, breakDuration, sessionDuration, totalDuration, maxAttempts } = req.body;
+    const { childId, letters, words, targetDuration, endDate, sessionName, breakDuration, maxAttempts } = req.body;
+
+    // Validate required session settings
+    if (!targetDuration || !breakDuration || (maxAttempts === null || maxAttempts === undefined)) {
+      return res.status(400).json({
+        success: false,
+        message: 'يجب تحديد targetDuration و breakDuration و maxAttempts'
+      });
+    }
+
     const toNumber = (value) => {
       const n = Number(value);
       return Number.isFinite(n) ? n : undefined;
-    };
+    }
 
     const child = await Child.findById(childId);
 
@@ -60,13 +70,12 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
       sessionName: sessionName || `Session ${nextSessionIndex}`,
       letters,
       words,
-      ...(typeof targetDuration !== 'undefined' ? { targetDuration: toNumber(targetDuration) } : {}),
-      ...(typeof playDuration !== 'undefined' ? { playDuration: toNumber(playDuration) } : {}),
-      ...(typeof breakDuration !== 'undefined' ? { breakDuration: toNumber(breakDuration) } : {}),
-      ...(typeof sessionDuration !== 'undefined' ? { sessionDuration: toNumber(sessionDuration) } : {}),
-      ...(typeof totalDuration !== 'undefined' ? { totalDuration: toNumber(totalDuration) } : {}),
-      ...(typeof maxAttempts !== 'undefined' ? { maxAttempts: toNumber(maxAttempts) } : {}),
-      endDate
+      // 🎯 REQUIRED SESSION SETTINGS - NO DEFAULTS
+      targetDuration: toNumber(targetDuration),
+      breakDuration: toNumber(breakDuration),
+      maxAttempts: toNumber(maxAttempts),
+      endDate,
+      active: true
     });
 
     // Update child's targets (store just the text for quick reference)
@@ -158,6 +167,7 @@ router.get('/child/:childId', protect, async (req, res) => {
 // @desc    Update exercise plan
 // @access  Private (Specialist)
 router.put('/:id', protect, authorize('specialist'), async (req, res) => {
+  console.log(`[PUT] /exercises/${req.params.id} - Body:`, req.body);
   try {
     let exercise = await Exercise.findById(req.params.id);
 
@@ -175,16 +185,28 @@ router.put('/:id', protect, authorize('specialist'), async (req, res) => {
       });
     }
 
-    exercise = await Exercise.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true
-    });
+    // Manual update to ensure validators (which rely on 'this') work correctly
+    const {
+      targetDuration, playDuration, breakDuration, maxAttempts,
+      letters, words, allowedDays
+    } = req.body;
+
+    if (targetDuration !== undefined) exercise.targetDuration = targetDuration;
+    if (playDuration !== undefined) exercise.playDuration = playDuration;
+    if (breakDuration !== undefined) exercise.breakDuration = breakDuration;
+    if (maxAttempts !== undefined) exercise.maxAttempts = maxAttempts;
+    if (letters !== undefined) exercise.letters = letters;
+    if (words !== undefined) exercise.words = words;
+    if (allowedDays !== undefined) exercise.allowedDays = allowedDays;
+
+    await exercise.save();
 
     res.json({
       success: true,
       exercise
     });
   } catch (error) {
+    console.error(`Exercise Update Error (ID: ${req.params.id}):`, error);
     res.status(500).json({
       success: false,
       message: error.message

@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
+const Admin = require('../models/Admin');
+const Specialist = require('../models/Specialist');
+const Parent = require('../models/Parent');
 const Center = require('../models/Center');
-const Child = require('../models/Child');
 const LinkRequest = require('../models/LinkRequest');
 const { protect, authorize } = require('../middleware/auth');
 
