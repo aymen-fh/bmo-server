@@ -36,7 +36,7 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
     }
 
     if (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id) {
-      const specialist = await User.findById(req.user.id).select('linkedParents');
+      const specialist = await Specialist.findById(req.user.id).select('linkedParents');
       const linkedParents = specialist?.linkedParents || [];
       const parentId = child.parent?.toString();
       const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
@@ -128,7 +128,7 @@ router.get('/child/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      const specialist = await User.findById(req.user.id).select('linkedParents');
+      const specialist = await Specialist.findById(req.user.id).select('linkedParents');
       const linkedParents = specialist?.linkedParents || [];
       const parentId = child.parent?.toString();
       const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
