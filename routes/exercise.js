@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Exercise = require('../models/Exercise');
 const Child = require('../models/Child');
-const Specialist = require('../models/Specialist');
+const Specialist = require('../models/Specialist'); // Correct Model Reference
 const Parent = require('../models/Parent'); // In case parents need read access
 const { protect, authorize } = require('../middleware/auth');
 
