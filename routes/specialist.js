@@ -198,11 +198,10 @@ router.post('/set-duration/:childId', protect, authorize('specialist'), async (r
 router.get('/search-parent', protect, authorize('specialist'), async (req, res) => {
   try {
     const { email, query } = req.query;
-    const specialist = await User.findById(req.user.id);
+    const specialist = await Specialist.findById(req.user.id);
     const linkedParentIds = specialist.linkedParents || [];
 
     let searchQuery = {
-      role: 'parent',
       _id: { $nin: linkedParentIds } // Exclude already linked parents
     };
 
@@ -220,7 +219,7 @@ router.get('/search-parent', protect, authorize('specialist'), async (req, res) 
       delete searchQuery.email; // Remove email filter if using $or
     }
 
-    const parents = await User.find(searchQuery)
+    const parents = await Parent.find(searchQuery)
       .select('_id name email phone profilePhoto')
       .limit(20); // Limit results
 
@@ -251,9 +250,9 @@ router.post('/link-parent', protect, authorize('specialist'), async (req, res) =
       });
     }
 
-    const parent = await User.findById(parentId);
+    const parent = await Parent.findById(parentId);
 
-    if (!parent || parent.role !== 'parent') {
+    if (!parent) {
       return res.status(404).json({
         success: false,
         message: 'Parent not found'
@@ -261,7 +260,7 @@ router.post('/link-parent', protect, authorize('specialist'), async (req, res) =
     }
 
     // Check if already linked
-    const specialist = await User.findById(req.user.id);
+    const specialist = await Specialist.findById(req.user.id);
     if (specialist.linkedParents && specialist.linkedParents.includes(parentId)) {
       return res.status(400).json({
         success: false,
@@ -270,12 +269,12 @@ router.post('/link-parent', protect, authorize('specialist'), async (req, res) =
     }
 
     // Link parent to specialist
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $addToSet: { linkedParents: parentId }
     });
 
     // Update parent's linkedSpecialist
-    await User.findByIdAndUpdate(parentId, {
+    await Parent.findByIdAndUpdate(parentId, {
       linkedSpecialist: req.user.id
     });
 
@@ -299,12 +298,12 @@ router.delete('/unlink-parent/:parentId', protect, authorize('specialist'), asyn
     const { parentId } = req.params;
 
     // Remove parent from specialist's linkedParents
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $pull: { linkedParents: parentId }
     });
 
     // Remove specialist from parent's linkedSpecialist
-    await User.findByIdAndUpdate(parentId, {
+    await Parent.findByIdAndUpdate(parentId, {
       linkedSpecialist: null
     });
 
@@ -325,7 +324,7 @@ router.delete('/unlink-parent/:parentId', protect, authorize('specialist'), asyn
 // @access  Private (Specialist)
 router.get('/parents', protect, authorize('specialist'), async (req, res) => {
   try {
-    const specialist = await User.findById(req.user.id)
+    const specialist = await Specialist.findById(req.user.id)
       .populate({
         path: 'linkedParents',
         select: '_id name email phone profilePhoto'
@@ -358,9 +357,15 @@ router.post('/create-parent', protect, authorize('specialist'), async (req, res)
       });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    // Check if user already exists in any collection
+    const emailLower = email.toLowerCase();
+    const [existingParent, existingSpecialist, existingAdmin] = await Promise.all([
+      Parent.findOne({ email: emailLower }),
+      Specialist.findOne({ email: emailLower }),
+      require('../models/Admin').findOne({ email: emailLower })
+    ]);
+
+    if (existingParent || existingSpecialist || existingAdmin) {
       return res.status(400).json({
         success: false,
         message: 'User with this email already exists'
@@ -368,18 +373,17 @@ router.post('/create-parent', protect, authorize('specialist'), async (req, res)
     }
 
     // Create the parent account
-    const parent = await User.create({
+    const parent = await Parent.create({
       name,
-      email: email.toLowerCase(),
+      email: emailLower,
       password,
-      role: 'parent',
       phone,
       emailVerified: true, // Auto-verify since specialist created it
       linkedSpecialist: req.user.id
     });
 
     // Add parent to specialist's linkedParents
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $addToSet: { linkedParents: parent._id }
     });
 
@@ -416,7 +420,7 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
     }
 
     // Verify parent exists and is linked to specialist
-    const specialist = await User.findById(req.user.id);
+    const specialist = await Specialist.findById(req.user.id);
     if (!specialist.linkedParents || !specialist.linkedParents.includes(parentId)) {
       return res.status(403).json({
         success: false,
@@ -425,7 +429,7 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
     }
 
     // Get parent details for email
-    const parent = await User.findById(parentId);
+    const parent = await Parent.findById(parentId);
 
     // Create the child
     const child = await Child.create({
@@ -441,7 +445,7 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
     });
 
     // Add child to specialist's assignedChildren
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $addToSet: { assignedChildren: child._id }
     });
 
@@ -497,7 +501,7 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
 // @access  Private (Specialist)
 router.get('/my-children', protect, authorize('specialist'), async (req, res) => {
   try {
-    const specialist = await User.findById(req.user.id);
+    const specialist = await Specialist.findById(req.user.id);
     const linkedParents = specialist.linkedParents || [];
 
     const children = await Child.find({
@@ -584,7 +588,7 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
     }
 
     // Check if parent is already linked to another specialist
-    const parent = await User.findById(request.from);
+    const parent = await Parent.findById(request.from);
     if (parent.linkedSpecialist && parent.linkedSpecialist.toString() !== req.user.id) {
       return res.status(400).json({
         success: false,
@@ -597,18 +601,18 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
     await request.save();
 
     // Link parent to specialist
-    await User.findByIdAndUpdate(req.user.id, {
+    await Specialist.findByIdAndUpdate(req.user.id, {
       $addToSet: { linkedParents: request.from }
     });
 
     // Update parent's linkedSpecialist
-    await User.findByIdAndUpdate(request.from, {
+    await Parent.findByIdAndUpdate(request.from, {
       linkedSpecialist: req.user.id
     });
 
     // 🔔 Create Notification for Parent
     try {
-      const specialist = await User.findById(req.user.id);
+      const specialist = await Specialist.findById(req.user.id);
       await Notification.create({
         recipient: request.from,
         type: 'success',

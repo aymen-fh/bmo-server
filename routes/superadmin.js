@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
+const Admin = require('../models/Admin');
+const Specialist = require('../models/Specialist');
+const Parent = require('../models/Parent');
 const Center = require('../models/Center');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -152,11 +154,11 @@ router.delete('/centers/:id', protect, authorize('superadmin'), async (req, res)
 
         // Remove center reference from admin and specialists
         if (center.admin) {
-            await User.findByIdAndUpdate(center.admin, { center: null });
+            await Admin.findByIdAndUpdate(center.admin, { center: null });
         }
 
         for (const specialistId of center.specialists) {
-            await User.findByIdAndUpdate(specialistId, { center: null });
+            await Specialist.findByIdAndUpdate(specialistId, { center: null });
         }
 
         await Center.findByIdAndDelete(req.params.id);
@@ -182,7 +184,7 @@ router.delete('/centers/:id', protect, authorize('superadmin'), async (req, res)
 // @access  Private (Superadmin)
 router.get('/admins', protect, authorize('superadmin'), async (req, res) => {
     try {
-        const admins = await User.find({ role: 'admin' })
+        const admins = await Admin.find()
             .populate('center', 'name')
             .select('-password')
             .sort('-createdAt');
@@ -215,7 +217,9 @@ router.post('/create-admin', protect, authorize('superadmin'), async (req, res) 
         }
 
         // Check if user already exists
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        const existingUser = await Admin.findOne({ email: email.toLowerCase() })
+            || await Specialist.findOne({ email: email.toLowerCase() })
+            || await Parent.findOne({ email: email.toLowerCase() });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -236,12 +240,11 @@ router.post('/create-admin', protect, authorize('superadmin'), async (req, res) 
         }
 
         // Create admin
-        const admin = await User.create({
+        const admin = await Admin.create({
             name,
             email: email.toLowerCase(),
             password,
             phone,
-            role: 'admin',
             center: centerId || null,
             createdBy: req.user.id,
             emailVerified: true
@@ -279,9 +282,9 @@ router.put('/admins/:id', protect, authorize('superadmin'), async (req, res) => 
     try {
         const { name, phone, centerId } = req.body;
 
-        const admin = await User.findById(req.params.id);
+        const admin = await Admin.findById(req.params.id);
 
-        if (!admin || admin.role !== 'admin') {
+        if (!admin) {
             return res.status(404).json({
                 success: false,
                 message: 'المدير غير موجود'
@@ -339,9 +342,9 @@ router.put('/admins/:id', protect, authorize('superadmin'), async (req, res) => 
 // @access  Private (Superadmin)
 router.delete('/admins/:id', protect, authorize('superadmin'), async (req, res) => {
     try {
-        const admin = await User.findById(req.params.id);
+        const admin = await Admin.findById(req.params.id);
 
-        if (!admin || admin.role !== 'admin') {
+        if (!admin) {
             return res.status(404).json({
                 success: false,
                 message: 'المدير غير موجود'
@@ -353,7 +356,7 @@ router.delete('/admins/:id', protect, authorize('superadmin'), async (req, res) 
             await Center.findByIdAndUpdate(admin.center, { admin: null });
         }
 
-        await User.findByIdAndDelete(req.params.id);
+        await Admin.findByIdAndDelete(req.params.id);
 
         res.json({
             success: true,
@@ -378,9 +381,9 @@ router.get('/stats', protect, authorize('superadmin'), async (req, res) => {
     try {
         const [centersCount, adminsCount, specialistsCount, parentsCount] = await Promise.all([
             Center.countDocuments(),
-            User.countDocuments({ role: 'admin' }),
-            User.countDocuments({ role: 'specialist' }),
-            User.countDocuments({ role: 'parent' })
+            Admin.countDocuments(),
+            Specialist.countDocuments(),
+            Parent.countDocuments()
         ]);
 
         res.json({
