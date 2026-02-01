@@ -618,6 +618,20 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
       linkedSpecialist: req.user.id
     });
 
+    // If request includes a child, assign that child to this specialist
+    if (request.child) {
+      const child = await Child.findById(request.child);
+      if (child) {
+        child.assignedSpecialist = req.user.id;
+        child.specialistRequestStatus = 'approved';
+        await child.save();
+
+        await Specialist.findByIdAndUpdate(req.user.id, {
+          $addToSet: { assignedChildren: child._id }
+        });
+      }
+    }
+
     // 🔔 Create Notification for Parent
     try {
       const specialist = await Specialist.findById(req.user.id);
