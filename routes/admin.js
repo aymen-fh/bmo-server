@@ -124,7 +124,7 @@ router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
     try {
         const specialist = await Specialist.findById(req.params.id)
             .populate('linkedParents', 'name email phone profilePhoto')
-            .populate('assignedChildren', 'name age parent');
+            .lean();
 
         if (!specialist || specialist.center.toString() !== req.user.center.toString()) {
             return res.status(404).json({
@@ -132,6 +132,14 @@ router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
                 message: 'الأخصائي غير موجود'
             });
         }
+
+        const assignedChildren = await Child.find({ assignedSpecialist: specialist._id })
+            .select('name age gender parent assignedSpecialist')
+            .populate('parent', 'name email phone')
+            .populate('assignedSpecialist', 'name email')
+            .lean();
+
+        specialist.assignedChildren = assignedChildren || [];
 
         res.json({
             success: true,
