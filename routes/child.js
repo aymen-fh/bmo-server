@@ -67,7 +67,7 @@ router.get('/', protect, async (req, res) => {
       // دعم جلب الأطفال المرتبطين بولي أمر محدد عبر query param
       const parentId = req.query.parentId || req.user.id;
       // Fetch parent to get linkedSpecialist
-      const parentUser = await User.findById(parentId)
+      const parentUser = await Parent.findById(parentId)
         .populate({
           path: 'linkedSpecialist',
           select: 'name email specialization phone profilePhoto center',
@@ -97,7 +97,7 @@ router.get('/', protect, async (req, res) => {
       console.log('👶 [CHILD ROUTE] Fetching children for specialist...');
 
       // Get specialist's linked parents
-      const specialist = await User.findById(req.user.id);
+      const specialist = await Specialist.findById(req.user.id);
       const linkedParents = specialist.linkedParents || [];
 
       children = await Child.find({
@@ -111,7 +111,7 @@ router.get('/', protect, async (req, res) => {
 
       // For specialist view, if child is linked but not assigned, show current user as specialist
       // We might need to fetch full specialist details if req.user is partial
-      const specialistDetails = await User.findById(req.user.id)
+      const specialistDetails = await Specialist.findById(req.user.id)
         .select('name email specialization phone profilePhoto')
         .populate('center', 'name nameEn')
         .lean();
@@ -182,7 +182,7 @@ router.get('/:id', protect, async (req, res) => {
 
       // Check if parent is linked
       if (!isAssigned && child.parent) {
-        const specialist = await User.findById(req.user.id);
+        const specialist = await Specialist.findById(req.user.id);
         const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
         isLinked = linkedParents.includes(child.parent._id.toString());
       }
@@ -235,7 +235,7 @@ router.put('/:id', protect, async (req, res) => {
 
       // Check if parent is linked
       if (!isAssigned && child.parent) {
-        const specialist = await User.findById(req.user.id);
+        const specialist = await Specialist.findById(req.user.id);
         const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
         isLinked = linkedParents.includes(child.parent.toString());
       }

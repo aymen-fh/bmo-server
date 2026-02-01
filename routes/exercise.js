@@ -167,18 +167,22 @@ router.get('/child/:childId', protect, async (req, res) => {
 // @desc    Update exercise plan
 // @access  Private (Specialist)
 router.put('/:id', protect, authorize('specialist'), async (req, res) => {
-  console.log(`[PUT] /exercises/${req.params.id} - Body:`, req.body);
+  console.log(`[PUT] /exercises/${req.params.id} - Body:`, JSON.stringify(req.body, null, 2));
   try {
     let exercise = await Exercise.findById(req.params.id);
 
     if (!exercise) {
+      console.error(`[PUT] Exercise ${req.params.id} not found`);
       return res.status(404).json({
         success: false,
         message: 'Exercise not found'
       });
     }
 
-    if (exercise.specialist.toString() !== req.user.id) {
+    console.log(`[PUT] Found exercise, specialist: ${exercise.specialist}, user: ${req.user.id}`);
+
+    if (exercise.specialist && exercise.specialist.toString() !== req.user.id) {
+      console.error(`[PUT] Authorization failed: exercise specialist ${exercise.specialist} != user ${req.user.id}`);
       return res.status(403).json({
         success: false,
         message: 'Not authorized'
@@ -191,6 +195,16 @@ router.put('/:id', protect, authorize('specialist'), async (req, res) => {
       letters, words, allowedDays
     } = req.body;
 
+    console.log(`[PUT] Updating exercise with:`, {
+      targetDuration,
+      playDuration,
+      breakDuration,
+      maxAttempts,
+      lettersCount: letters?.length,
+      wordsCount: words?.length,
+      allowedDays
+    });
+
     if (targetDuration !== undefined) exercise.targetDuration = targetDuration;
     if (playDuration !== undefined) exercise.playDuration = playDuration;
     if (breakDuration !== undefined) exercise.breakDuration = breakDuration;
@@ -199,18 +213,33 @@ router.put('/:id', protect, authorize('specialist'), async (req, res) => {
     if (words !== undefined) exercise.words = words;
     if (allowedDays !== undefined) exercise.allowedDays = allowedDays;
 
-    await exercise.save();
+    console.log(`[PUT] Saving exercise...`);
+    const savedExercise = await exercise.save();
+    console.log(`[PUT] Exercise saved successfully`);
 
     res.json({
       success: true,
-      exercise
+      exercise: savedExercise
     });
   } catch (error) {
-    console.error(`Exercise Update Error (ID: ${req.params.id}):`, error);
-    res.status(500).json({
+    console.error(`!!! Exercise Update Error (ID: ${req.params.id}):`, error.message);
+    console.error('Error stack:', error.stack);
+
+    // More detailed error response
+    const errorResponse = {
       success: false,
       message: error.message
-    });
+    };
+
+    // Include validation errors if present
+    if (error.name === 'ValidationError') {
+      errorResponse.validationErrors = Object.keys(error.errors).map(key => ({
+        field: key,
+        message: error.errors[key].message
+      }));
+    }
+
+    res.status(500).json(errorResponse);
   }
 });
 
