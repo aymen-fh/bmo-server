@@ -3,6 +3,7 @@ const router = express.Router();
 const Specialist = require('../models/Specialist');
 const Parent = require('../models/Parent');
 const Child = require('../models/Child');
+const LinkRequest = require('../models/LinkRequest');
 const { protect, authorize } = require('../middleware/auth');
 const Notification = require('../models/Notification');
 
