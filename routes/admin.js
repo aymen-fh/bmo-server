@@ -443,7 +443,11 @@ router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async
                 { parent: { $in: Array.from(linkedParentIds) } }
             ]
         })
-            .populate('parent', 'name email phone profilePhoto')
+            .populate({
+                path: 'parent',
+                select: 'name email phone profilePhoto linkedSpecialist',
+                populate: { path: 'linkedSpecialist', select: 'name email' }
+            })
             .populate('assignedSpecialist', 'name specialization');
 
         res.json({
@@ -674,7 +678,11 @@ router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async
                 { parent: { $in: Array.from(linkedParentIds) } }
             ]
         })
-            .populate('parent', 'name email phone')
+            .populate({
+                path: 'parent',
+                select: 'name email phone profilePhoto linkedSpecialist',
+                populate: { path: 'linkedSpecialist', select: 'name email' }
+            })
             .populate('assignedSpecialist', 'name email')
             .lean();
 
