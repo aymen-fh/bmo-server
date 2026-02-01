@@ -124,7 +124,7 @@ router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
     try {
         const specialist = await Specialist.findById(req.params.id)
             .populate('linkedParents', 'name email phone profilePhoto')
-            .lean();
+            .populate('assignedChildren', 'name age parent');
 
         if (!specialist || specialist.center.toString() !== req.user.center.toString()) {
             return res.status(404).json({
@@ -132,14 +132,6 @@ router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
                 message: 'الأخصائي غير موجود'
             });
         }
-
-        const assignedChildren = await Child.find({ assignedSpecialist: specialist._id })
-            .select('name age gender parent assignedSpecialist')
-            .populate('parent', 'name email phone')
-            .populate('assignedSpecialist', 'name email')
-            .lean();
-
-        specialist.assignedChildren = assignedChildren || [];
 
         res.json({
             success: true,
@@ -404,8 +396,19 @@ router.post('/specialists/:id/link-child', protect, authorize('admin'), checkCen
             return res.status(404).json({ success: false, message: 'الطفل غير موجود' });
         }
 
+        // If child already assigned to another specialist, remove from that specialist list
+        if (child.assignedSpecialist && String(child.assignedSpecialist) !== String(specialistId)) {
+            await Specialist.findByIdAndUpdate(child.assignedSpecialist, {
+                $pull: { assignedChildren: child._id }
+            });
+        }
+
         child.assignedSpecialist = specialistId;
         await child.save();
+
+        await Specialist.findByIdAndUpdate(specialistId, {
+            $addToSet: { assignedChildren: child._id }
+        });
 
         res.json({ success: true, message: 'تم تعيين الطفل للأخصائي' });
     } catch (error) {
@@ -430,6 +433,10 @@ router.post('/specialists/:id/unlink-child/:childId', protect, authorize('admin'
 
         child.assignedSpecialist = undefined;
         await child.save();
+
+        await Specialist.findByIdAndUpdate(specialistId, {
+            $pull: { assignedChildren: child._id }
+        });
 
         res.json({ success: true, message: 'تم إلغاء تعيين الطفل' });
     } catch (error) {
