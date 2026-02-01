@@ -14,7 +14,9 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
     const { childId, letters, words, targetDuration, endDate, sessionName, breakDuration, maxAttempts } = req.body;
 
     // Validate required session settings
-    if (!targetDuration || !breakDuration || (maxAttempts === null || maxAttempts === undefined)) {
+    if (targetDuration === null || targetDuration === undefined
+      || breakDuration === null || breakDuration === undefined
+      || maxAttempts === null || maxAttempts === undefined) {
       return res.status(400).json({
         success: false,
         message: 'يجب تحديد targetDuration و breakDuration و maxAttempts'
@@ -182,11 +184,27 @@ router.put('/:id', protect, authorize('specialist'), async (req, res) => {
     console.log(`[PUT] Found exercise, specialist: ${exercise.specialist}, user: ${req.user.id}`);
 
     if (exercise.specialist && exercise.specialist.toString() !== req.user.id) {
-      console.error(`[PUT] Authorization failed: exercise specialist ${exercise.specialist} != user ${req.user.id}`);
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized'
-      });
+      // Allow updates if the child is assigned to this specialist or linked via parent
+      const child = await Child.findById(exercise.child).select('assignedSpecialist parent');
+      const isAssigned = child?.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+
+      let isLinked = false;
+      if (!isAssigned && child?.parent) {
+        const specialist = await Specialist.findById(req.user.id).select('linkedParents');
+        const linkedParents = specialist?.linkedParents || [];
+        isLinked = linkedParents.map(String).includes(String(child.parent));
+      }
+
+      if (!isAssigned && !isLinked) {
+        console.error(`[PUT] Authorization failed: exercise specialist ${exercise.specialist} != user ${req.user.id}`);
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
+
+      // Normalize ownership for legacy exercises
+      exercise.specialist = req.user.id;
     }
 
     // Manual update to ensure validators (which rely on 'this') work correctly
