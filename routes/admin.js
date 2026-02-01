@@ -3,6 +3,7 @@ const router = express.Router();
 const Admin = require('../models/Admin');
 const Specialist = require('../models/Specialist');
 const Parent = require('../models/Parent');
+const User = require('../models/User');
 const Child = require('../models/Child'); // Added Child model
 const Center = require('../models/Center');
 const LinkRequest = require('../models/LinkRequest');
@@ -132,9 +133,42 @@ router.get('/specialists/:id', protect, authorize('admin'), checkCenterAccess, a
             });
         }
 
-        const assignedChildren = await Child.find({ assignedSpecialist: specialist._id })
-            .select('name age gender parent avatarId')
-            .populate('parent', 'name email phone profilePhoto');
+        // Support legacy data where specialists may exist in User collection
+        const legacySpecialist = await User.findOne({
+            role: 'specialist',
+            $or: [
+                { email: specialist.email },
+                { staffId: specialist.staffId }
+            ]
+        }).select('_id linkedParents');
+
+        const specialistIds = [specialist._id];
+        if (legacySpecialist && String(legacySpecialist._id) !== String(specialist._id)) {
+            specialistIds.push(legacySpecialist._id);
+        }
+
+        const linkedParentsFromSpecialist = (specialist.linkedParents || []).map(p => (p?._id || p));
+        const linkedParentsFromLegacy = (legacySpecialist?.linkedParents || []).map(p => (p?._id || p));
+
+        const parentIds = await Parent.find({
+            linkedSpecialist: { $in: specialistIds }
+        }).select('_id');
+
+        const parentIdList = [
+            ...parentIds.map(p => p._id),
+            ...linkedParentsFromSpecialist,
+            ...linkedParentsFromLegacy
+        ];
+
+        const assignedChildren = await Child.find({
+            $or: [
+                { assignedSpecialist: { $in: specialistIds } },
+                { parent: { $in: parentIdList } }
+            ]
+        })
+            .select('name age gender parent avatarId assignedSpecialist')
+            .populate('parent', 'name email phone profilePhoto')
+            .populate('assignedSpecialist', 'name email');
 
         const specialistData = specialist.toObject();
         specialistData.assignedChildren = assignedChildren || [];
