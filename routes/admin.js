@@ -412,6 +412,12 @@ router.post('/specialists/:id/unlink-parent/:parentId', protect, authorize('admi
             linkedSpecialist: null
         });
 
+        // Unassign all children of this parent from the specialist
+        await Child.updateMany(
+            { parent: parentId, assignedSpecialist: specialistId },
+            { $set: { assignedSpecialist: null, specialistRequestStatus: 'none' } }
+        );
+
         res.json({ success: true, message: 'تم إلغاء ربط ولي الأمر' });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

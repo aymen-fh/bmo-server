@@ -308,6 +308,12 @@ router.delete('/unlink-parent/:parentId', protect, authorize('specialist'), asyn
       linkedSpecialist: null
     });
 
+      // Unassign all children of this parent from the specialist
+      await Child.updateMany(
+        { parent: parentId, assignedSpecialist: req.user.id },
+        { $set: { assignedSpecialist: null, specialistRequestStatus: 'none' } }
+      );
+
     res.json({
       success: true,
       message: 'Parent unlinked successfully'
