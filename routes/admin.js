@@ -53,6 +53,41 @@ router.get('/center', protect, authorize('admin'), checkCenterAccess, async (req
     }
 });
 
+const updateCenterProfile = async (req, res) => {
+    try {
+        const { name, nameEn, address, phone, email, description, isActive } = req.body;
+
+        const center = await Center.findById(req.user.center);
+        if (!center) {
+            return res.status(404).json({ success: false, message: 'المركز غير موجود' });
+        }
+
+        if (name !== undefined) center.name = name;
+        if (nameEn !== undefined) center.nameEn = nameEn;
+        if (address !== undefined) center.address = address;
+        if (phone !== undefined) center.phone = phone;
+        if (email !== undefined) center.email = email;
+        if (description !== undefined) center.description = description;
+        if (isActive !== undefined) center.isActive = isActive;
+
+        await center.save();
+
+        res.json({ success: true, message: 'تم تحديث بيانات المركز', center });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @route   PUT /api/admin/center
+// @desc    Update admin's center details
+// @access  Private (Admin)
+router.put('/center', protect, authorize('admin'), checkCenterAccess, updateCenterProfile);
+
+// @route   POST /api/admin/center
+// @desc    Update admin's center details (POST fallback)
+// @access  Private (Admin)
+router.post('/center', protect, authorize('admin'), checkCenterAccess, updateCenterProfile);
+
 // ========================================
 // SPECIALIST MANAGEMENT
 // ========================================
