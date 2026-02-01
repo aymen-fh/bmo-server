@@ -33,27 +33,7 @@ const checkCenterAccess = async (req, res, next) => {
 // CENTER INFO
 // ========================================
 
-// @route   GET /api/admin/center
-// @desc    Get admin's center details
-// @access  Private (Admin)
-router.get('/center', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
-    try {
-        const center = await Center.findById(req.user.center)
-            .populate('specialists', 'name email phone specialization linkedParents assignedChildren');
-
-        res.json({
-            success: true,
-            center
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-});
-
-const updateCenterProfile = async (req, res) => {
+const updateCenterHandler = async (req, res) => {
     try {
         const { name, nameEn, address, phone, email, description, isActive } = req.body;
 
@@ -78,15 +58,35 @@ const updateCenterProfile = async (req, res) => {
     }
 };
 
+// @route   GET /api/admin/center
+// @desc    Get admin's center details
+// @access  Private (Admin)
+router.get('/center', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
+    try {
+        const center = await Center.findById(req.user.center)
+            .populate('specialists', 'name email phone specialization linkedParents assignedChildren');
+
+        res.json({
+            success: true,
+            center
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
 // @route   PUT /api/admin/center
 // @desc    Update admin's center details
 // @access  Private (Admin)
-router.put('/center', protect, authorize('admin'), checkCenterAccess, updateCenterProfile);
+router.put('/center', protect, authorize('admin'), checkCenterAccess, updateCenterHandler);
 
 // @route   POST /api/admin/center
 // @desc    Update admin's center details (POST fallback)
 // @access  Private (Admin)
-router.post('/center', protect, authorize('admin'), checkCenterAccess, updateCenterProfile);
+router.post('/center', protect, authorize('admin'), checkCenterAccess, updateCenterHandler);
 
 // ========================================
 // SPECIALIST MANAGEMENT
