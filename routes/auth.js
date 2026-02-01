@@ -204,6 +204,10 @@ router.get('/me', protect, async (req, res) => {
 
         if (user.role === 'parent') {
             user = await Parent.findById(user._id).populate('assignedChildren');
+        } else if (user.role === 'specialist') {
+            user = await Specialist.findById(user._id).populate('center');
+        } else if (user.role === 'admin' || user.role === 'superadmin') {
+            user = await Admin.findById(user._id).populate('center');
         }
 
         res.json({
