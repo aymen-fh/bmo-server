@@ -430,11 +430,18 @@ router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (re
 // @access  Private (Admin)
 router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id linkedParents');
         const specialistIds = specialists.map(s => s._id);
+        const linkedParentIds = new Set();
+        specialists.forEach(s => {
+            (s.linkedParents || []).forEach(p => linkedParentIds.add(p.toString()));
+        });
 
         const children = await Child.find({
-            assignedSpecialist: { $in: specialistIds }
+            $or: [
+                { assignedSpecialist: { $in: specialistIds } },
+                { parent: { $in: Array.from(linkedParentIds) } }
+            ]
         })
             .populate('parent', 'name email phone profilePhoto')
             .populate('assignedSpecialist', 'name specialization');
@@ -652,13 +659,20 @@ router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (re
 // @access  Private (Admin)
 router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Get all specialists in center
-        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
+        // Get all specialists in center (and their linked parents)
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id linkedParents');
         const specialistIds = specialists.map(s => s._id);
+        const linkedParentIds = new Set();
+        specialists.forEach(s => {
+            (s.linkedParents || []).forEach(p => linkedParentIds.add(p.toString()));
+        });
 
-        // Find all children assigned to these specialists
+        // Find all children assigned to specialists OR whose parents are linked to center specialists
         const children = await Child.find({
-            assignedSpecialist: { $in: specialistIds }
+            $or: [
+                { assignedSpecialist: { $in: specialistIds } },
+                { parent: { $in: Array.from(linkedParentIds) } }
+            ]
         })
             .populate('parent', 'name email phone')
             .populate('assignedSpecialist', 'name email')
