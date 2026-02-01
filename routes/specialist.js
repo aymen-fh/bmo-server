@@ -125,15 +125,8 @@ router.post('/set-duration/:childId', protect, authorize('specialist'), async (r
     }
 
     const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-    let isLinked = false;
 
-    if (!isAssigned && child.parent) {
-      const specialist = await Specialist.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
-      isLinked = linkedParents.includes(child.parent.toString());
-    }
-
-    if (!isAssigned && !isLinked) {
+    if (!isAssigned) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized'
@@ -508,14 +501,8 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
 // @access  Private (Specialist)
 router.get('/my-children', protect, authorize('specialist'), async (req, res) => {
   try {
-    const specialist = await Specialist.findById(req.user.id);
-    const linkedParents = specialist.linkedParents || [];
-
     const children = await Child.find({
-      $or: [
-        { assignedSpecialist: req.user.id },
-        { parent: { $in: linkedParents } }
-      ]
+      assignedSpecialist: req.user.id
     }).populate('parent', 'name email phone profilePhoto');
 
     res.json({
