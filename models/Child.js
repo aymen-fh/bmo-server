@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Counter = require('./Counter');
 
 const childSchema = new mongoose.Schema({
   name: {
@@ -88,8 +89,31 @@ const childSchema = new mongoose.Schema({
 // Pre-save hook to generate childId
 childSchema.pre('save', async function (next) {
   if (this.isNew && !this.childId) {
-    const count = await this.constructor.countDocuments();
-    this.childId = `CH-${String(count + 1).padStart(4, '0')}`;
+    let counter = await Counter.findById('childId');
+
+    if (!counter) {
+      const lastChild = await this.constructor
+        .findOne({ childId: /^CH-\d+$/ })
+        .sort({ childId: -1 })
+        .select('childId')
+        .lean();
+
+      let startSeq = 0;
+      if (lastChild?.childId) {
+        const parsed = parseInt(lastChild.childId.split('-')[1], 10);
+        if (!Number.isNaN(parsed)) startSeq = parsed;
+      }
+
+      await Counter.create({ _id: 'childId', seq: startSeq });
+    }
+
+    counter = await Counter.findByIdAndUpdate(
+      'childId',
+      { $inc: { seq: 1 } },
+      { new: true }
+    );
+
+    this.childId = `CH-${String(counter.seq).padStart(4, '0')}`;
   }
 
   // Set avatarId based on gender if not provided

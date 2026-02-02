@@ -301,6 +301,94 @@ router.get('/sessions/:childId', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/progress/sessions-full/:childId
+// @desc    Get sessions with attempts for analytics
+// @access  Private
+router.get('/sessions-full/:childId', protect, async (req, res) => {
+  try {
+    const child = await Child.findById(req.params.childId);
+
+    if (!child) {
+      return res.status(404).json({
+        success: false,
+        message: 'Child not found'
+      });
+    }
+
+    // Check authorization
+    if (req.user.role === 'parent' && child.parent.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized'
+      });
+    }
+
+    if (req.user.role === 'specialist') {
+      const specialist = await User.findById(req.user.id);
+      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
+      const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
+      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
+
+      if (!isAssigned && !isLinked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized'
+        });
+      }
+    }
+
+    const progress = await Progress.findOne({ child: req.params.childId }).lean();
+
+    if (!progress || !progress.sessions || progress.sessions.length === 0) {
+      return res.json({
+        success: true,
+        sessions: []
+      });
+    }
+
+    const sessions = progress.sessions
+      .slice(-30)
+      .map(session => ({
+        sessionDate: session.sessionDate,
+        duration: session.duration || 0,
+        planExerciseId: session.planExerciseId || null,
+        planSessionIndex: typeof session.planSessionIndex === 'number' ? session.planSessionIndex : null,
+        planSessionName: session.planSessionName || null,
+        totalAttempts: session.totalAttempts || 0,
+        successfulAttempts: session.successfulAttempts || 0,
+        failedAttempts: session.failedAttempts || 0,
+        averageScore: clamp01(session.averageScore || 0),
+        attempts: Array.isArray(session.attempts)
+          ? session.attempts.map(a => ({
+              letter: a.letter,
+              word: a.word,
+              vowel: a.vowel,
+              success: !!a.success,
+              score: typeof a.score === 'number' ? a.score : undefined,
+              pronunciationScore: typeof a.pronunciationScore === 'number' ? a.pronunciationScore : undefined,
+              accuracyScore: typeof a.accuracyScore === 'number' ? a.accuracyScore : undefined,
+              fluencyScore: typeof a.fluencyScore === 'number' ? a.fluencyScore : undefined,
+              completenessScore: typeof a.completenessScore === 'number' ? a.completenessScore : undefined,
+              recognizedText: a.recognizedText,
+              referenceText: a.referenceText,
+              analysisSource: a.analysisSource,
+              timestamp: a.timestamp
+            }))
+          : []
+      }));
+
+    res.json({
+      success: true,
+      sessions
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
 // @route   GET /api/progress/attempts/:childId
 // @desc    Get recent attempts (flattened across sessions)
 // @access  Private
