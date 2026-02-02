@@ -38,17 +38,10 @@ router.post('/', protect, authorize('specialist'), async (req, res) => {
     }
 
     if (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id) {
-      const specialist = await Specialist.findById(req.user.id).select('linkedParents');
-      const linkedParents = specialist?.linkedParents || [];
-      const parentId = child.parent?.toString();
-      const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
-
-      if (!isLinkedParentChild) {
-        return res.status(403).json({
-          success: false,
-          message: 'Not authorized'
-        });
-      }
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized'
+      });
     }
 
     // Ensure only one active plan at a time (kind: 'plan')
@@ -130,16 +123,10 @@ router.get('/child/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist' && (!child.assignedSpecialist || child.assignedSpecialist.toString() !== req.user.id)) {
-      const specialist = await Specialist.findById(req.user.id).select('linkedParents');
-      const linkedParents = specialist?.linkedParents || [];
-      const parentId = child.parent?.toString();
-      const isLinkedParentChild = parentId && linkedParents.map(String).includes(String(parentId));
-      if (!isLinkedParentChild) {
-        return res.status(403).json({
-          success: false,
-          message: 'Not authorized'
-        });
-      }
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized'
+      });
     }
 
     const includeInactive = String(req.query.includeInactive || '').toLowerCase() === '1'
@@ -184,18 +171,11 @@ router.put('/:id', protect, authorize('specialist'), async (req, res) => {
     console.log(`[PUT] Found exercise, specialist: ${exercise.specialist}, user: ${req.user.id}`);
 
     if (exercise.specialist && exercise.specialist.toString() !== req.user.id) {
-      // Allow updates if the child is assigned to this specialist or linked via parent
+      // Allow updates only if the child is assigned to this specialist
       const child = await Child.findById(exercise.child).select('assignedSpecialist parent');
       const isAssigned = child?.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
 
-      let isLinked = false;
-      if (!isAssigned && child?.parent) {
-        const specialist = await Specialist.findById(req.user.id).select('linkedParents');
-        const linkedParents = specialist?.linkedParents || [];
-        isLinked = linkedParents.map(String).includes(String(child.parent));
-      }
-
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         console.error(`[PUT] Authorization failed: exercise specialist ${exercise.specialist} != user ${req.user.id}`);
         return res.status(403).json({
           success: false,

@@ -28,12 +28,9 @@ router.get('/child/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist') {
-      const specialist = await User.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
 
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized'
@@ -180,12 +177,9 @@ router.get('/stats/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist') {
-      const specialist = await User.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
 
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized'
@@ -249,12 +243,9 @@ router.get('/sessions/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist') {
-      const specialist = await User.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
 
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized'
@@ -324,12 +315,9 @@ router.get('/sessions-full/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist') {
-      const specialist = await User.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
 
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized'
@@ -412,12 +400,9 @@ router.get('/attempts/:childId', protect, async (req, res) => {
     }
 
     if (req.user.role === 'specialist') {
-      const specialist = await User.findById(req.user.id);
-      const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
       const isAssigned = child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-      const isLinked = child.parent && linkedParents.includes(child.parent.toString());
 
-      if (!isAssigned && !isLinked) {
+      if (!isAssigned) {
         return res.status(403).json({
           success: false,
           message: 'Not authorized'

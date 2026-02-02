@@ -35,17 +35,15 @@ router.get('/dashboard', protect, async (req, res) => {
     try {
         const specialistId = req.user.id;
 
-        const specialist = await User.findById(specialistId);
-
         const childrenQuery = {
             assignedSpecialist: specialistId
         };
 
-        const [childrenCount, linkRequestsCount, linkedParentsCount, assignedChildrenIds] = await Promise.all([
+        const [childrenCount, linkRequestsCount, assignedChildrenIds, parentIds] = await Promise.all([
             Child.countDocuments(childrenQuery),
             LinkRequest.countDocuments({ to: specialistId, status: 'pending' }),
-            (specialist.linkedParents ? specialist.linkedParents.length : 0),
-            Child.find(childrenQuery).select('_id').lean()
+            Child.find(childrenQuery).select('_id').lean(),
+            Child.distinct('parent', childrenQuery)
         ]);
 
         const childIds = (assignedChildrenIds || []).map(c => c._id);
@@ -101,7 +99,7 @@ router.get('/dashboard', protect, async (req, res) => {
             stats: {
                 children: childrenCount,
                 pendingRequests: linkRequestsCount,
-                parents: linkedParentsCount,
+                parents: parentIds.length,
                 sessions: sessionsCount
             },
             recentChildren
@@ -126,13 +124,9 @@ router.get('/words', protect, async (req, res) => {
         if (childId) {
             // Verify the child is assigned to this specialist
             const child = await Child.findById(childId);
-            const specialist = await User.findById(req.user.id);
-            const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
-
             const isAssigned = child && child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-            const isLinked = child && child.parent && linkedParents.includes(child.parent.toString());
 
-            if (!child || (!isAssigned && !isLinked)) {
+            if (!child || !isAssigned) {
                 return res.status(403).json({
                     success: false,
                     message: 'Not authorized to access this child'
@@ -174,15 +168,9 @@ router.get('/words', protect, async (req, res) => {
                 difficulty
             });
         } else {
-            // Get all children assigned to this specialist OR linked parents
-            const specialist = await User.findById(req.user.id);
-            const linkedParents = specialist.linkedParents || [];
-
+            // Get all children assigned to this specialist
             const children = await Child.find({
-                $or: [
-                    { assignedSpecialist: req.user.id },
-                    { parent: { $in: linkedParents } }
-                ]
+                assignedSpecialist: req.user.id
             })
                 .populate('parent', 'name')
                 .select('_id name age parent avatarId');
@@ -227,13 +215,9 @@ router.post('/content/add', protect, async (req, res) => {
 
         // Verify the child is assigned to this specialist
         const child = await Child.findById(childId);
-        const specialist = await User.findById(req.user.id);
-        const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
-
         const isAssigned = child && child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-        const isLinked = child && child.parent && linkedParents.includes(child.parent.toString());
 
-        if (!child || (!isAssigned && !isLinked)) {
+        if (!child || !isAssigned) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to add content for this child'
@@ -323,13 +307,9 @@ router.post('/content/delete/:contentId', protect, async (req, res) => {
 
         // Verify the content belongs to a child assigned to this specialist
         const child = await Child.findById(doc.child);
-        const specialist = await User.findById(req.user.id);
-        const linkedParents = (specialist.linkedParents || []).map(id => id.toString());
-
         const isAssigned = child && child.assignedSpecialist && child.assignedSpecialist.toString() === req.user.id;
-        const isLinked = child && child.parent && linkedParents.includes(child.parent.toString());
 
-        if (!child || (!isAssigned && !isLinked)) {
+        if (!child || !isAssigned) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to delete this content'

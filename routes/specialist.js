@@ -601,12 +601,10 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
       });
     }
 
-    // Check if parent is already linked to another specialist
-    const parent = await Parent.findById(request.from);
-    if (parent.linkedSpecialist && parent.linkedSpecialist.toString() !== req.user.id) {
+    if (!request.child) {
       return res.status(400).json({
         success: false,
-        message: 'Parent is already linked to another specialist'
+        message: 'Child ID is required for linking'
       });
     }
 
@@ -614,29 +612,30 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
     request.status = 'accepted';
     await request.save();
 
-    // Link parent to specialist
-    await Specialist.findByIdAndUpdate(req.user.id, {
-      $addToSet: { linkedParents: request.from }
-    });
-
-    // Update parent's linkedSpecialist
-    await Parent.findByIdAndUpdate(request.from, {
-      linkedSpecialist: req.user.id
-    });
-
-    // If request includes a child, assign that child to this specialist
-    if (request.child) {
-      const child = await Child.findById(request.child);
-      if (child) {
-        child.assignedSpecialist = req.user.id;
-        child.specialistRequestStatus = 'approved';
-        await child.save();
-
-        await Specialist.findByIdAndUpdate(req.user.id, {
-          $addToSet: { assignedChildren: child._id }
-        });
-      }
+    // Assign the child to this specialist
+    const child = await Child.findById(request.child);
+    if (!child) {
+      return res.status(404).json({
+        success: false,
+        message: 'Child not found'
+      });
     }
+
+    // Prevent reassigning child to another specialist
+    if (child.assignedSpecialist && child.assignedSpecialist.toString() !== req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Child is already assigned to another specialist'
+      });
+    }
+
+    child.assignedSpecialist = req.user.id;
+    child.specialistRequestStatus = 'approved';
+    await child.save();
+
+    await Specialist.findByIdAndUpdate(req.user.id, {
+      $addToSet: { assignedChildren: child._id }
+    });
 
     // 🔔 Create Notification for Parent
     try {
@@ -654,9 +653,14 @@ router.post('/accept-link-request/:requestId', protect, authorize('specialist'),
       console.error('❌ Failed to create notification:', notifError.message);
     }
 
-    // Cancel any other pending requests from this parent
+    // Cancel any other pending requests for the same child
     await LinkRequest.updateMany(
-      { from: request.from, status: 'pending', _id: { $ne: request._id } },
+      {
+        from: request.from,
+        child: request.child,
+        status: 'pending',
+        _id: { $ne: request._id }
+      },
       { status: 'rejected' }
     );
 
@@ -705,6 +709,15 @@ router.post('/reject-link-request/:requestId', protect, authorize('specialist'),
     // Update request status
     request.status = 'rejected';
     await request.save();
+
+    // Update child status if applicable
+    if (request.child) {
+      const child = await Child.findById(request.child);
+      if (child && child.specialistRequestStatus === 'pending') {
+        child.specialistRequestStatus = 'rejected';
+        await child.save();
+      }
+    }
 
     res.json({
       success: true,

@@ -139,7 +139,8 @@ router.get('/conversations', protect, async (req, res) => {
 
         // Get conversations with details
         const conversations = await Promise.all(userIds.map(async (otherUserId) => {
-            const otherUser = await User.findById(otherUserId).select('name email role');
+            const otherUser = await User.findById(otherUserId)
+                .select('name email role profilePhoto');
 
             if (!otherUser) return null;
 
