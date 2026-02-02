@@ -557,6 +557,7 @@ router.get('/link-requests', protect, authorize('admin'), async (req, res) => {
 
         const requests = await LinkRequest.find(query)
             .populate('from', 'name email phone') // 'from' is usually a Specialist
+            .populate('child', 'name age gender')
             .sort('-createdAt');
 
         res.json({
