@@ -36,13 +36,9 @@ router.get('/dashboard', protect, async (req, res) => {
         const specialistId = req.user.id;
 
         const specialist = await User.findById(specialistId);
-        const linkedParents = specialist.linkedParents || [];
 
         const childrenQuery = {
-            $or: [
-                { assignedSpecialist: specialistId },
-                { parent: { $in: linkedParents } }
-            ]
+            assignedSpecialist: specialistId
         };
 
         const [childrenCount, linkRequestsCount, linkedParentsCount, assignedChildrenIds] = await Promise.all([

@@ -409,13 +409,31 @@ router.post('/create-parent', protect, authorize('specialist'), async (req, res)
 // @access  Private (Specialist)
 router.post('/create-child', protect, authorize('specialist'), async (req, res) => {
   try {
-    const { parentId, name, age, gender, targetLetters, targetWords, difficultyLevel } = req.body;
+    const { parentId, name, age, birthDate, gender, targetLetters, targetWords, difficultyLevel } = req.body;
+
+    const toNumber = (value) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    const computedAge = (() => {
+      if (!birthDate) return undefined;
+      const dt = new Date(birthDate);
+      if (Number.isNaN(dt.getTime())) return undefined;
+      const now = new Date();
+      let years = now.getFullYear() - dt.getFullYear();
+      const m = now.getMonth() - dt.getMonth();
+      if (m < 0 || (m === 0 && now.getDate() < dt.getDate())) years -= 1;
+      return years;
+    })();
+
+    const ageValue = toNumber(age) ?? computedAge;
 
     // Validate required fields
-    if (!parentId || !name || !age || !gender) {
+    if (!parentId || !name || !ageValue || !gender) {
       return res.status(400).json({
         success: false,
-        message: 'Parent ID, name, age and gender are required'
+        message: 'Parent ID, name, age/birthDate and gender are required'
       });
     }
 
@@ -434,7 +452,8 @@ router.post('/create-child', protect, authorize('specialist'), async (req, res) 
     // Create the child
     const child = await Child.create({
       name,
-      age,
+      age: ageValue,
+      ...(birthDate ? { birthDate } : {}),
       gender,
       parent: parentId,
       assignedSpecialist: req.user.id,
