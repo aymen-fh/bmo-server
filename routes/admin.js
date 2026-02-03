@@ -98,9 +98,15 @@ router.post('/center', protect, authorize('admin'), checkCenterAccess, updateCen
 // @access  Private (Admin)
 router.get('/specialists', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        const specialists = await Specialist.find({
-            center: req.user.center
-        })
+        const centerSpecialistIds = Array.isArray(req.center?.specialists)
+            ? req.center.specialists.map(id => id.toString())
+            : [];
+
+        const specialistQuery = centerSpecialistIds.length > 0
+            ? { _id: { $in: centerSpecialistIds }, center: req.user.center }
+            : { center: req.user.center };
+
+        const specialists = await Specialist.find(specialistQuery)
             .populate('linkedParents', 'name email')
             .select('name email phone specialization linkedParents assignedChildren profilePhoto staffId createdAt')
             .lean();
@@ -832,10 +838,12 @@ router.get('/specialists/:id/search-parents', protect, authorize('admin'), check
             });
         }
 
-        const parentsWithChildren = parents.map(parent => ({
-            ...parent,
-            children: childrenByParent.get(parent._id.toString()) || []
-        }));
+        const parentsWithChildren = parents
+            .map(parent => ({
+                ...parent,
+                children: childrenByParent.get(parent._id.toString()) || []
+            }))
+            .filter(parent => parent.children.length > 0);
 
         res.json({
             success: true,
