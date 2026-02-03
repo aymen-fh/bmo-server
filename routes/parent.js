@@ -33,10 +33,25 @@ router.get('/search-specialists', protect, authorize('parent'), async (req, res)
             ];
         }
 
-        const specialists = await Specialist.find(searchQuery)
+        let specialists = await Specialist.find(searchQuery)
             .select('_id name email phone specialization profilePhoto bio center')
-            .populate('center', '_id name nameEn address phone email description')
+            .populate('center', '_id name nameEn address phone email description specialists isActive')
             .limit(30);
+
+        specialists = specialists.map((s) => {
+            const center = s.center;
+            if (!center || center.isActive === false) {
+                s.center = null;
+                return s;
+            }
+
+            const centerSpecialists = (center.specialists || []).map(id => id.toString());
+            if (s.center && s.center._id && !centerSpecialists.includes(s._id.toString())) {
+                s.center = null;
+            }
+
+            return s;
+        });
 
         res.json({
             success: true,
@@ -73,10 +88,19 @@ router.get('/search-centers', protect, authorize('parent'), async (req, res) => 
             ];
         }
 
-        const centers = await Center.find(searchQuery)
+        let centers = await Center.find(searchQuery)
             .select('name address phone email description specialists')
-            .populate('specialists', 'name specialization profilePhoto')
+            .populate('specialists', 'name specialization profilePhoto center')
             .limit(30);
+
+        centers = centers.map(center => {
+            const validSpecialists = (center.specialists || []).filter(s => {
+                return s && s.center && s.center.toString() === center._id.toString();
+            });
+
+            center.specialists = validSpecialists;
+            return center;
+        });
 
         res.json({
             success: true,
