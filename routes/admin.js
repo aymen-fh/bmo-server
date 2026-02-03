@@ -745,20 +745,13 @@ router.get('/parents', protect, authorize('admin'), checkCenterAccess, async (re
 // @access  Private (Admin)
 router.get('/my-children', protect, authorize('admin'), checkCenterAccess, async (req, res) => {
     try {
-        // Get all specialists in center (and their linked parents)
-        const specialists = await Specialist.find({ center: req.user.center }).select('_id linkedParents');
+        // Get all specialists in center
+        const specialists = await Specialist.find({ center: req.user.center }).select('_id');
         const specialistIds = specialists.map(s => s._id);
-        const linkedParentIds = new Set();
-        specialists.forEach(s => {
-            (s.linkedParents || []).forEach(p => linkedParentIds.add(p.toString()));
-        });
 
-        // Find all children assigned to specialists OR whose parents are linked to center specialists
+        // Find all children assigned to specialists in this center
         const children = await Child.find({
-            $or: [
-                { assignedSpecialist: { $in: specialistIds } },
-                { parent: { $in: Array.from(linkedParentIds) } }
-            ]
+            assignedSpecialist: { $in: specialistIds }
         })
             .populate({
                 path: 'parent',
@@ -815,9 +808,38 @@ router.get('/specialists/:id/search-parents', protect, authorize('admin'), check
             .limit(20)
             .lean();
 
+        const parentIds = parents.map(parent => parent._id);
+        let childrenByParent = new Map();
+
+        if (parentIds.length > 0) {
+            const children = await Child.find({
+                parent: { $in: parentIds },
+                $or: [
+                    { assignedSpecialist: { $exists: false } },
+                    { assignedSpecialist: null }
+                ]
+            })
+                .select('name age gender parent assignedSpecialist')
+                .lean();
+
+            children.forEach(child => {
+                const parentId = child.parent ? child.parent.toString() : null;
+                if (!parentId) return;
+                if (!childrenByParent.has(parentId)) {
+                    childrenByParent.set(parentId, []);
+                }
+                childrenByParent.get(parentId).push(child);
+            });
+        }
+
+        const parentsWithChildren = parents.map(parent => ({
+            ...parent,
+            children: childrenByParent.get(parent._id.toString()) || []
+        }));
+
         res.json({
             success: true,
-            parents
+            parents: parentsWithChildren
         });
     } catch (error) {
         res.status(500).json({

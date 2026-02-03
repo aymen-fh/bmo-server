@@ -17,7 +17,8 @@ router.get('/search-specialists', protect, authorize('parent'), async (req, res)
 
         // Build search query
         let searchQuery = {
-            role: 'specialist'
+            role: 'specialist',
+            center: { $ne: null }
         };
 
         // Exclude already linked specialist - REMOVED to allow parents to see all
@@ -38,19 +39,9 @@ router.get('/search-specialists', protect, authorize('parent'), async (req, res)
             .populate('center', '_id name nameEn address phone email description specialists isActive')
             .limit(30);
 
-        specialists = specialists.map((s) => {
+        specialists = specialists.filter((s) => {
             const center = s.center;
-            if (!center || center.isActive === false) {
-                s.center = null;
-                return s;
-            }
-
-            const centerSpecialists = (center.specialists || []).map(id => id.toString());
-            if (s.center && s.center._id && !centerSpecialists.includes(s._id.toString())) {
-                s.center = null;
-            }
-
-            return s;
+            return center && center.isActive !== false;
         });
 
         res.json({
@@ -89,18 +80,32 @@ router.get('/search-centers', protect, authorize('parent'), async (req, res) => 
         }
 
         let centers = await Center.find(searchQuery)
-            .select('name address phone email description specialists')
-            .populate('specialists', 'name specialization profilePhoto center')
-            .limit(30);
+            .select('name address phone email description')
+            .limit(30)
+            .lean();
 
-        centers = centers.map(center => {
-            const validSpecialists = (center.specialists || []).filter(s => {
-                return s && s.center && s.center.toString() === center._id.toString();
+        const centerIds = centers.map(center => center._id);
+        const specialistsByCenter = new Map();
+
+        if (centerIds.length > 0) {
+            const specialists = await Specialist.find({ center: { $in: centerIds } })
+                .select('name specialization profilePhoto center')
+                .lean();
+
+            specialists.forEach((specialist) => {
+                const centerId = specialist.center ? specialist.center.toString() : null;
+                if (!centerId) return;
+                if (!specialistsByCenter.has(centerId)) {
+                    specialistsByCenter.set(centerId, []);
+                }
+                specialistsByCenter.get(centerId).push(specialist);
             });
+        }
 
-            center.specialists = validSpecialists;
-            return center;
-        });
+        centers = centers.map(center => ({
+            ...center,
+            specialists: specialistsByCenter.get(center._id.toString()) || []
+        }));
 
         res.json({
             success: true,
