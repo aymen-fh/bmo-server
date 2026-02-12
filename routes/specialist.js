@@ -324,15 +324,40 @@ router.delete('/unlink-parent/:parentId', protect, authorize('specialist'), asyn
 // @access  Private (Specialist)
 router.get('/parents', protect, authorize('specialist'), async (req, res) => {
   try {
-    const specialist = await Specialist.findById(req.user.id)
-      .populate({
-        path: 'linkedParents',
-        select: '_id name email phone profilePhoto'
+    const specialist = await Specialist.findById(req.user.id).select('linkedParents');
+
+    if (!specialist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Specialist not found'
       });
+    }
+
+    const linkedParentIds = Array.isArray(specialist.linkedParents)
+      ? specialist.linkedParents.map(id => id.toString())
+      : [];
+
+    // Fallback/merge: derive parents from assigned children
+    const childParentIds = await Child.distinct('parent', {
+      assignedSpecialist: req.user.id
+    });
+
+    const parentIdSet = new Set([
+      ...linkedParentIds,
+      ...childParentIds.map(id => id.toString())
+    ]);
+
+    const parentIds = Array.from(parentIdSet);
+
+    const parents = parentIds.length > 0
+      ? await Parent.find({ _id: { $in: parentIds } })
+        .select('_id name email phone profilePhoto')
+        .lean()
+      : [];
 
     res.json({
       success: true,
-      parents: specialist.linkedParents || []
+      parents
     });
   } catch (error) {
     res.status(500).json({
